@@ -1,0 +1,31 @@
+
+{% extends 'layout.html' %}
+
+{% block content %}
+    <h1>List Users</h1>
+
+    {% if users %}
+        <table border="1">
+            <thead>
+                <tr>
+                    <th>Identifier</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for user in users %}
+                    <tr>
+                        <td>{{ user.id }}</td>
+                        <td>{{ user.name }}</td>
+                        <td>{{ user.role }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No users registered.</p>
+    {% endif %}
+
+{% endblock %}

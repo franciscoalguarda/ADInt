@@ -1,0 +1,35 @@
+
+{% extends 'layout.html' %}
+
+{% block content %}
+    <h1>Bulk Add Users</h1>
+
+    <p>Select a CSV file containing the users to import.</p>
+
+    <form method="POST"
+          action="{{ url_for('bulk_add_users') }}"
+          enctype="multipart/form-data">
+
+        <p>
+            <label for="file">CSV File:</label>
+            <input type="file"
+                   id="file"
+                   name="file"
+                   accept=".csv"
+                   required>
+        </p>
+
+        <button type="submit">Import Users</button>
+    </form>
+
+    <h3>Expected CSV Format</h3>
+
+    <pre>
+        id,name,password,role
+        1001,Ana Silva,temporary123,Student
+        2001,Joao Pereira,temporary456,Professor
+        3001,Maria Costa,temporary789,Exam invigilator
+        4001,Pedro Santos,temporary012,Administrator
+    </pre>
+
+{% endblock %}
