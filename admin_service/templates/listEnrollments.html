@@ -1,0 +1,23 @@
+{# Enrollment table combining each student's ID with its exam information. #}
+{% extends "layout.html" %}
+{% block title %}Student enrollments — Admin Service{% endblock %}
+{% block content %}
+  <h2>Student enrollments</h2>
+  {% if enrollments %}
+    <table>
+      <thead><tr><th>Exam ID</th><th>Course</th><th>Exam date</th><th>Student ID</th></tr></thead>
+      <tbody>
+        {% for enrollment in enrollments %}
+          <tr>
+            <td>{{ enrollment.exam.id }}</td>
+            <td>{{ enrollment.exam.course }}</td>
+            <td>{{ enrollment.exam.date.isoformat() }}</td>
+            <td>{{ enrollment.student_id }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No student enrollments have been recorded yet.</p>
+  {% endif %}
+{% endblock %}

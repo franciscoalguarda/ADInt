@@ -1,0 +1,14 @@
+{# Multipart form for uploading the CSV of student IDs for this exam. #}
+{% extends "layout.html" %}
+{% block title %}Enroll students — Admin Service{% endblock %}
+{% block content %}
+  <h2>Enroll students — {{ exam.course }} ({{ exam.date.isoformat() }})</h2>
+  <p>Upload a UTF-8 CSV file with a <code>student_id</code> column and one student ID per row.</p>
+  <form method="post" enctype="multipart/form-data">
+    <label for="file">Student CSV
+      <input id="file" name="file" type="file" accept=".csv,text/csv" required>
+    </label>
+    <button type="submit">Enroll students</button>
+  </form>
+  <p><a href="{{ url_for('list_exams') }}">Back to scheduled exams</a></p>
+{% endblock %}
