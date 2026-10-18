@@ -65,6 +65,7 @@ def validate_user_id(value):
     except (TypeError, ValueError) as error:
         raise ValueError("Invalid user identifier.") from error
 
+    # Validação que é um inteiro positivo, único e não superior ao valor máximo de 64 bits (2^63 - 1)
     if user_id <= 0 or user_id > 2**63 - 1:
         raise ValueError("Identifier must be a positive 64-bit integer.")
 
