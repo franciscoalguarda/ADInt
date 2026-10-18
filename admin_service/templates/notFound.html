@@ -1,0 +1,8 @@
+{# Friendly 404 page used when a route references an exam that does not exist. #}
+{% extends "layout.html" %}
+{% block title %}Not found — Admin Service{% endblock %}
+{% block content %}
+  <h2>Exam not found</h2>
+  <p>The requested exam does not exist.</p>
+  <p><a href="{{ url_for('list_exams') }}">View scheduled exams</a></p>
+{% endblock %}

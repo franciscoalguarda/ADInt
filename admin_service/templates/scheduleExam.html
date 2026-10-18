@@ -1,0 +1,17 @@
+{# Form for creating an exam; invalid submissions keep the entered values visible. #}
+{% extends "layout.html" %}
+{% block title %}Schedule an exam — Admin Service{% endblock %}
+{% block content %}
+  <h2>Schedule an exam</h2>
+  <form method="post">
+    <label for="course">Course
+      <input id="course" name="course" maxlength="200" required
+             value="{{ request.form.get('course', '') }}">
+    </label>
+    <label for="date">Exam date
+      <input id="date" name="date" type="date" required
+             value="{{ request.form.get('date', '') }}">
+    </label>
+    <button type="submit">Schedule exam</button>
+  </form>
+{% endblock %}

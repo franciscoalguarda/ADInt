@@ -1,0 +1,28 @@
+{# Exam table with links for enrollment and a POST action to request printing. #}
+{% extends "layout.html" %}
+{% block title %}Scheduled exams — Admin Service{% endblock %}
+{% block content %}
+  <h2>Scheduled exams</h2>
+  {% if exams %}
+    <table>
+      <thead><tr><th>Exam ID</th><th>Date</th><th>Course</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for exam in exams %}
+          <tr>
+            <td>{{ exam.id }}</td>
+            <td>{{ exam.date.isoformat() }}</td>
+            <td>{{ exam.course }}</td>
+            <td class="actions">
+              <a href="{{ url_for('enroll_students', exam_id=exam.id) }}">Enroll students</a>
+              <form method="post" action="{{ url_for('order_printing', exam_id=exam.id) }}">
+                <button type="submit">Order printing</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No exams have been scheduled yet.</p>
+  {% endif %}
+{% endblock %}
