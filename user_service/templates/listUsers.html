@@ -10,7 +10,7 @@
                 <tr>
                     <th>Identifier</th>
                     <th>Name</th>
-                    <th>Role</th>
+                    <th>Roles</th>
                 </tr>
             </thead>
 
@@ -19,7 +19,7 @@
                     <tr>
                         <td>{{ user.id }}</td>
                         <td>{{ user.name }}</td>
-                        <td>{{ user.role }}</td>
+                        <td>{{ user.roles | map(attribute='name') | join(', ') }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

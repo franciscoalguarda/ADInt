@@ -1,15 +1,20 @@
-from flask import Flask, render_template, request, send_from_directory, redirect, url_for, jsonify
-from sqlalchemy import create_engine, select, Column, Integer, String, Date, ForeignKey
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from sqlalchemy.exc import IntegrityError
-import datetime
-from os import path
+import csv
+import io
+import os
 
-from user_data import User, Base
+from flask import Flask, flash, render_template, request, redirect, url_for
+from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.orm import selectinload, sessionmaker
+from sqlalchemy.exc import IntegrityError
+from os import path
+from werkzeug.security import generate_password_hash
+
+from user_data import Role, User, Base
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ.get("USER_SECRET_KEY") or os.urandom(32)
 
-DATABASE_FILE = "users.sqlite"
+DATABASE_FILE = path.join(path.dirname(path.abspath(__file__)), "users.sqlite")
 db_exists = False
 if path.exists(DATABASE_FILE):
     db_exists = True
@@ -22,163 +27,221 @@ Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 # session = Session()
 
-VALID_ROLES = (
-    "Administrator",
-    "Professor",
-    "Student",
-    "Exam invigilator"
-)
-
 '''
     Database access functions
 '''
-
+ROLES = ["Administrator", "Professor", "Exam invigilator", "Student"]
 
 '''
-    Web Application routes
+    Function to create default roles in the database if they do not already exist.
 '''
-# Home page
+def create_roles():
+    with Session.begin() as session:
+        for role_name in ROLES:
+            role = session.scalar(
+                select(Role).where(Role.name == role_name)
+            )
+
+            if role is None:
+                session.add(Role(name=role_name))
+
+    print("Default roles verified.")
+
+
+create_roles()
+
+# User listing
+def get_all_users():
+    query = select(User).options(selectinload(User.roles)).order_by(User.id)
+
+    with Session() as session:
+        return session.scalars(query).all()
+
+
+# User id validation
+def validate_user_id(value):
+    try:
+        user_id = int(str(value).strip())
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid user identifier.") from error
+
+    if user_id <= 0 or user_id > 2**63 - 1:
+        raise ValueError("Identifier must be a positive 64-bit integer.")
+
+    return user_id
+
+# User name and password validation
+def validate_user_details(name, password):
+    if not name or not password.strip():
+        raise ValueError("Name and password are required.")
+
+# Role lookup by user data
+def get_role_names(user_data):
+    if hasattr(user_data, "getlist"):
+        role_values = user_data.getlist("role")
+    else:
+        role_values = [user_data.get("role") or ""]
+
+    role_names = []
+    for value in role_values:
+        for role_name in value.split("|"):
+            role_name = role_name.strip()
+            if role_name not in role_names:
+                role_names.append(role_name)
+
+    return role_names
+
+# Role validation
+def validate_role_names(role_names):
+    if not role_names or role_names == [""]:
+        raise ValueError("Select at least one user role.")
+
+    for role_name in role_names:
+        if role_name not in ROLES:
+            raise ValueError("Invalid user role.")
+
+# User creation and saving
+def create_user(user_data, session):
+    user_id = validate_user_id(user_data.get("id", ""))
+    name = (user_data.get("name") or "").strip()
+    password = user_data.get("password") or ""
+    role_names = get_role_names(user_data)
+
+    validate_user_details(name, password)
+    validate_role_names(role_names)
+    if session.get(User, user_id) is not None:
+        raise ValueError(f"User identifier {user_id} already exists.")
+
+    role_query = select(Role).where(Role.name.in_(role_names))
+    user = User(
+        id=user_id,
+        name=name,
+        password=generate_password_hash(password),
+        roles=session.scalars(role_query).all(),
+    )
+    session.add(user)
+    return user
+
+# CSV import
+def validate_csv_upload(upload):
+    if upload is None or not upload.filename:
+        raise ValueError("Please select a CSV file.")
+
+    if not upload.filename.lower().endswith(".csv"):
+        raise ValueError("Only CSV files are accepted.")
+
+# CSV header validation
+def validate_csv_headers(headers):
+    required_columns = {"id", "name", "password", "role"}
+    missing_columns = not required_columns.issubset(headers)
+    duplicate_columns = len(headers) != len(set(headers))
+
+    if missing_columns or duplicate_columns:
+        raise ValueError(
+            "CSV must contain unique id, name, password and role columns."
+        )
+
+# CSV reading
+def read_users_csv(upload):
+    validate_csv_upload(upload)
+    contents = upload.read().decode("utf-8-sig")
+    stream = io.StringIO(contents, newline="")
+    reader = csv.DictReader(stream, strict=True)
+    validate_csv_headers(reader.fieldnames or [])
+    return reader
+
+# CSV row validation
+def validate_csv_row(row, line_number):
+    extra_fields = None in row
+    missing_fields = None in row.values()
+
+    if extra_fields or missing_fields:
+        raise ValueError(f"Invalid number of CSV fields at line {line_number}.")
+
+# CSV user row extraction
+def get_csv_user_rows(reader):
+    for row in reader:
+        line_number = reader.line_num
+        validate_csv_row(row, line_number)
+        if any(value.strip() for value in row.values()):
+            yield line_number, row
+
+# CSV user saving
+def save_csv_users(reader, session):
+    count = 0
+    for line_number, row in get_csv_user_rows(reader):
+        try:
+            create_user(row, session)
+        except ValueError as error:
+            raise ValueError(f"CSV line {line_number}: {error}") from error
+        count += 1
+
+    if count == 0:
+        raise ValueError("CSV file contains no users.")
+
+    return count
+
+# CSV import handling
+def import_users_from_csv(upload):
+    try:
+        reader = read_users_csv(upload)
+        with Session.begin() as session:
+            return save_csv_users(reader, session)
+    except UnicodeDecodeError as error:
+        raise ValueError("The CSV file must use UTF-8 encoding.") from error
+    except csv.Error as error:
+        raise ValueError("Invalid CSV format.") from error
+    except IntegrityError as error:
+        raise ValueError(
+            "Duplicate user identifier. No users were imported."
+        ) from error
+
+
+# Web application routes
 @app.route("/")
 def index():
     return render_template("index.html")
 
-# SU_1 - List users page
+# SU_1 - List users
 @app.route("/list_users")
 def list_users():
-    with Session() as session:
-        users = session.scalars(select(User).order_by(User.id)).all()
-
+    users = get_all_users()
     return render_template("listUsers.html", users=users)
 
-# SU_2 - Add user page
+# SU_2 - Add one user
+@app.route("/users/add", methods=["GET", "POST"])
+def add_user():
+    if request.method == "POST":
+        try:
+            with Session.begin() as session:
+                create_user(request.form, session)
+        except ValueError as error:
+            flash(str(error), "error")
+        except IntegrityError:
+            flash("User identifier already exists.", "error")
+        else:
+            flash("User added successfully.", "success")
+            return redirect(url_for("list_users"))
 
+    return render_template("addUser.html", roles=ROLES)
 
-# SU_3 - Bulk add users page
+# SU_3 - Bulk add users
+@app.route("/users/bulk-add", methods=["GET", "POST"])
+def bulk_add_users():
+    if request.method == "POST":
+        try:
+            count = import_users_from_csv(request.files.get("file"))
+        except ValueError as error:
+            flash(str(error), "error")
+        else:
+            flash(f"{count} users imported successfully.", "success")
+            return redirect(url_for("list_users"))
 
-
+    return render_template("bulkAddUsers.html")
 
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
         port=5001,
-        debug=True
+        debug=True,
     )
-
-
-
-
-# def create_user(data):
-#     """Validate user data and create a User object."""
-
-#     try:
-#         user_id = int(str(data.get("id", "")).strip())
-#     except (TypeError, ValueError):
-#         raise ValueError("Invalid user identifier.")
-
-#     if user_id <= 0:
-#         raise ValueError("Identifier must be positive.")
-
-#     name = (data.get("name") or "").strip()
-#     password = data.get("password") or ""
-#     role = (data.get("role") or "").strip()
-
-#     if not name or not password:
-#         raise ValueError("Name and password are required.")
-
-#     if role not in VALID_ROLES:
-#         raise ValueError("Invalid user role.")
-
-#     return User(
-#         id=user_id,
-#         name=name,
-#         password=generate_password_hash(password),
-#         role=role
-#     )
-
-# # SU_2 - Add user
-# @app.route("/users/add", methods=["GET", "POST"])
-# def add_user():
-
-#     if request.method == "POST":
-#         try:
-#             user = create_user(request.form)
-
-#             with Session.begin() as session:
-#                 if session.get(User, user.id) is not None:
-#                     raise ValueError("User identifier already exists.")
-
-#                 session.add(user)
-
-#             flash("User added successfully.", "success")
-#             return redirect(url_for("list_users"))
-
-#         except ValueError as error:
-#             flash(str(error), "error")
-
-#         except IntegrityError:
-#             flash("User identifier already exists.", "error")
-
-#     return render_template("addUser.html")
-
-
-# # SU_3 - Bulk add users
-# @app.route("/users/bulk-add", methods=["GET", "POST"])
-# def bulk_add_users():
-
-#     if request.method == "POST":
-#         file = request.files.get("file")
-
-#         if not file or not file.filename:
-#             flash("Please select a CSV file.", "error")
-#             return redirect(url_for("bulk_add_users"))
-
-#         if not file.filename.lower().endswith(".csv"):
-#             flash("Only CSV files are accepted.", "error")
-#             return redirect(url_for("bulk_add_users"))
-
-#         try:
-#             content = file.read().decode("utf-8-sig")
-#             reader = csv.DictReader(io.StringIO(content))
-
-#             required = {"id", "name", "password", "role"}
-
-#             if not required.issubset(reader.fieldnames or []):
-#                 raise ValueError("Invalid CSV columns.")
-
-#             count = 0
-#             imported_ids = set()
-
-#             with Session.begin() as session:
-#                 for line_number, row in enumerate(reader, start=2):
-#                     if not any(row.values()):
-#                         continue
-
-#                     user = create_user(row)
-
-#                     if user.id in imported_ids:
-#                         raise ValueError(
-#                             f"Duplicate identifier at line {line_number}."
-#                         )
-
-#                     if session.get(User, user.id) is not None:
-#                         raise ValueError(
-#                             f"User {user.id} already exists."
-#                         )
-
-#                     imported_ids.add(user.id)
-#                     session.add(user)
-#                     count += 1
-
-#                 if count == 0:
-#                     raise ValueError("CSV file contains no users.")
-
-#             flash(f"{count} users imported successfully.", "success")
-#             return redirect(url_for("list_users"))
-
-#         except (ValueError, UnicodeDecodeError, csv.Error) as error:
-#             flash(str(error), "error")
-
-#         except IntegrityError:
-#             flash("Duplicate user identifier.", "error")
-
-#     return render_template("bulkAddUsers.html")

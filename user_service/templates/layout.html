@@ -9,6 +9,9 @@
     </header>
 
     <main>
+        {% for category, message in get_flashed_messages(with_categories=true) %}
+            <p class="{{ category }}" role="status">{{ message }}</p>
+        {% endfor %}
         {% block content %}{% endblock %}
     </main>
 

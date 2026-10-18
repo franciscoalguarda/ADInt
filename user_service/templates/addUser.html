@@ -20,15 +20,19 @@
             <input type="password" id="password" name="password" required>
         </p>
 
-        <p>
-            <label for="role">Role:</label>
-            <select id="role" name="role" required>
-                <option value="Administrator">Administrator</option>
-                <option value="Professor">Professor</option>
-                <option value="Student">Student</option>
-                <option value="Exam invigilator">Exam invigilator</option>
-            </select>
-        </p>
+        <fieldset>
+            <legend>Roles</legend>
+            <p>Select at least one role.</p>
+            {% for role in roles %}
+                <p>
+                    <label>
+                        <input type="checkbox" name="role" value="{{ role }}"
+                               {% if role in request.form.getlist('role') %}checked{% endif %}>
+                        {{ role }}
+                    </label>
+                </p>
+            {% endfor %}
+        </fieldset>
 
         <button type="submit">Add User</button>
     </form>
