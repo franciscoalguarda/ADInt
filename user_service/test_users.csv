@@ -1,0 +1,6 @@
+id,name,password,role
+1001,Ana Silva,TesteAdmin123!,Administrator
+1002,Bruno Costa,TesteProf123!,Professor
+1003,Carla Santos,TesteVigilante123!,Exam invigilator
+1004,Diogo Ferreira,TesteAluno123!,Student
+1005,Eva Martins,TesteMulti123!,Professor|Administrator
