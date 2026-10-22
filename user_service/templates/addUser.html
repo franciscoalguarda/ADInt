@@ -1,40 +1,36 @@
 
 {% extends 'layout.html' %}
+{% block title %}Add user — User Service{% endblock %}
 
 {% block content %}
-    <h1>Add User</h1>
+    <h2>Add user</h2>
 
-    <form method="POST" action="{{ url_for('add_user') }}">
-        <p>
-            <label for="id">Identifier:</label>
-            <input type="number" id="id" name="id" min="1" required>
-        </p>
+    <form method="post" action="{{ url_for('add_user') }}">
+        <label for="id">Identifier
+            <input type="number" id="id" name="id" min="1" max="9223372036854775807" required value="{{ request.form.get('id', '') }}">
+        </label>
 
-        <p>
-            <label for="name">Name:</label>
-            <input type="text" id="name" name="name" required>
-        </p>
+        <label for="name">Name
+            <input type="text" id="name" name="name" autocomplete="name" required value="{{ request.form.get('name', '') }}">
+        </label>
 
-        <p>
-            <label for="password">Password:</label>
-            <input type="password" id="password" name="password" required>
-        </p>
+        <label for="password">Password
+            <input type="password" id="password" name="password" autocomplete="new-password" required>
+        </label>
 
-        <fieldset>
+        <fieldset aria-describedby="roles-help">
             <legend>Roles</legend>
-            <p>Select at least one role.</p>
+            <p id="roles-help">Select at least one role.</p>
             {% for role in roles %}
-                <p>
-                    <label>
-                        <input type="checkbox" name="role" value="{{ role }}"
-                               {% if role in request.form.getlist('role') %}checked{% endif %}>
-                        {{ role }}
-                    </label>
-                </p>
+                <label class="checkbox">
+                    <input type="checkbox" name="role" value="{{ role }}"
+                           {% if role in request.form.getlist('role') %}checked{% endif %}>
+                    {{ role }}
+                </label>
             {% endfor %}
         </fieldset>
 
-        <button type="submit">Add User</button>
+        <button type="submit">Add user</button>
     </form>
 
 {% endblock %}

@@ -1,0 +1,6 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>{{ 'Corrected answers' if corrected else 'Answers to correct' }}</h2>
+  <p>All professors' answers are listed. Unassigned pages can also be corrected in Part 1.</p>
+  {% include 'answerTable.html' %}
+{% endblock %}

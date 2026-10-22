@@ -1,0 +1,12 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>Upload exam resolution scan</h2>
+  <p>Upload one PDF containing answer pages from a single exam (up to 50 MB).</p>
+  <p>Each sheet must contain four answer pages in question order (1, 2, 3 and 4). An introductory first page is ignored: for the five-page example PDFs, only pages 2–5 are used for correction.</p>
+  <p>The original PDF is preserved. Detected QR codes are covered in the pages used for correction.</p>
+  <form method="post" enctype="multipart/form-data">
+    <label>Exam identifier <input name="exam_id" type="number" min="1" max="9223372036854775807" required value="{{ request.form.get('exam_id', '') }}"></label>
+    <label>PDF scan <input name="file" type="file" accept=".pdf,application/pdf" required></label>
+    <button type="submit">Upload and split pages</button>
+  </form>
+{% endblock %}

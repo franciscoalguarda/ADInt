@@ -1,0 +1,17 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>Exam scans and corrections</h2>
+  <p>Student identities are unavailable in Part 1. Use the scan, sheet and question numbers to locate an answer.</p>
+  <h3>Uploaded scans</h3>
+  {% if sources %}
+    <table>
+      <thead><tr><th>Scan</th><th>Exam</th><th>Original PDF</th></tr></thead>
+      <tbody>{% for source in sources %}
+        <tr><td>{{ source.id }}</td><td>{{ source.exam_id }}</td>
+          <td><a href="{{ url_for('original_pdf', scan_id=source.id) }}">{{ source.filename }}</a></td></tr>
+      {% endfor %}</tbody>
+    </table>
+  {% else %}<p>No scans uploaded yet.</p>{% endif %}
+  <h3>Answer pages and corrections</h3>
+  {% include 'answerTable.html' %}
+{% endblock %}
