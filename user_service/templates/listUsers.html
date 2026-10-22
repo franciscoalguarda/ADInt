@@ -1,11 +1,13 @@
 
 {% extends 'layout.html' %}
+{% block title %}Users — User Service{% endblock %}
 
 {% block content %}
-    <h1>List Users</h1>
+    <h2>Registered users</h2>
 
     {% if users %}
-        <table border="1">
+      <div class="table-container">
+        <table>
             <thead>
                 <tr>
                     <th>Identifier</th>
@@ -24,6 +26,7 @@
                 {% endfor %}
             </tbody>
         </table>
+      </div>
     {% else %}
         <p>No users registered.</p>
     {% endif %}

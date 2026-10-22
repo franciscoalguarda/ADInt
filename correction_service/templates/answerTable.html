@@ -1,0 +1,20 @@
+{% if rows %}
+  <div class="table-container">
+    <table>
+      <thead><tr><th>Question</th><th>Exam</th><th>Scan / sheet / page</th><th>Professor</th><th>Grade</th><th>Comment</th><th>Actions</th></tr></thead>
+      <tbody>{% for answer, source, assignment in rows %}
+        <tr>
+          <td>{{ answer.question_number }}</td><td>{{ source.exam_id }}</td>
+          <td>{{ source.id }} / {{ answer.sheet_number }} / {{ answer.page_number }}</td>
+          <td>{{ assignment.professor_id if assignment else 'Unassigned' }}</td>
+          <td>{{ answer.grade if answer.evaluated else 'Pending' }}</td>
+          <td class="comment">{{ answer.comment }}</td>
+          <td>
+            <a href="{{ url_for('correct_answer', answer_id=answer.id) }}">{{ 'View / edit correction' if answer.evaluated else 'Correct answer' }}</a>
+            <a href="{{ url_for('answer_page', answer_id=answer.id, extension='pdf') }}">Page PDF</a>
+          </td>
+        </tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+{% else %}<p>No answers to display.</p>{% endif %}

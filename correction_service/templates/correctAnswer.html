@@ -1,0 +1,17 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>Question {{ answer.question_number }}</h2>
+  <p>Exam {{ source.exam_id }}, scan {{ source.id }}, sheet {{ answer.sheet_number }}, page {{ answer.page_number }}.</p>
+  <p>Status: {{ 'Corrected' if answer.evaluated else 'Pending' }}.</p>
+  <a href="{{ url_for('answer_page', answer_id=answer.id, extension='pdf') }}">Open page PDF</a>
+  <img class="scan" src="{{ url_for('answer_page', answer_id=answer.id, extension='png') }}" alt="Scanned answer for question {{ answer.question_number }} with detected QR codes covered">
+  <form method="post">
+    <label>Grade
+      <input name="grade" type="number" min="0" step="any" required value="{{ request.form.get('grade', answer.grade if answer.evaluated else '') }}">
+    </label>
+    <label>Correction comments
+      <textarea name="comment" rows="5">{{ request.form.get('comment', answer.comment) }}</textarea>
+    </label>
+    <button type="submit">Save correction</button>
+  </form>
+{% endblock %}

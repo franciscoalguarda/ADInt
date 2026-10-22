@@ -1,0 +1,25 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>Professor assignments</h2>
+  <p>Each exam question has one professor. Saving an existing exam/question updates its professor.</p>
+  <form method="post">
+    <label>Exam identifier <input name="exam_id" type="number" min="1" max="9223372036854775807" required value="{{ request.form.get('exam_id', '') }}"></label>
+    <label>Professor identifier <input name="professor_id" type="number" min="1" max="9223372036854775807" required value="{{ request.form.get('professor_id', '') }}"></label>
+    <label>Question number
+      <select name="question_number" required>
+        {% for number in range(1, 5) %}
+          <option value="{{ number }}" {% if request.form.get('question_number') == number|string %}selected{% endif %}>{{ number }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save assignment</button>
+  </form>
+  {% if assignments %}
+    <table>
+      <thead><tr><th>Exam</th><th>Question</th><th>Professor</th></tr></thead>
+      <tbody>{% for assignment in assignments %}
+        <tr><td>{{ assignment.exam_id }}</td><td>{{ assignment.question_number }}</td><td>{{ assignment.professor_id }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  {% else %}<p>No professors assigned yet.</p>{% endif %}
+{% endblock %}
