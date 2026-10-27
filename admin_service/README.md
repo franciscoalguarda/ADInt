@@ -42,12 +42,12 @@ service stores the supplied student IDs but cannot verify that those users exist
 
 The Admin Service calls the XML-RPC method `print_exam` with four positional
 arguments: `exam_id` (integer), `exam_date` (ISO `YYYY-MM-DD` string), `course`
-(string), and `student_ids` (list of integers). The Printing Service is not yet
-implemented in this repository; configure its actual endpoint with
-`ADMIN_PRINTING_RPC_URL` and keep this method signature aligned between the
-services. A failed RPC is reported to the administrator; it is not recorded as
-a successful order.
+(string), and `student_ids` (list of integers). The Printing Service implements this contract at `http://127.0.0.1:5003` by
+default. Configure its endpoint with `ADMIN_PRINTING_RPC_URL` if needed. A
+failed RPC is reported to the administrator; it is not recorded as a successful
+order.
 
 Each exam is assumed to have four questions, as specified in the project brief.
-The Printing Service is responsible for producing the resulting resolution
-sheets/PDF.
+The Printing Service produces a single PDF with four pages per enrolled student
+and a unique QR-code identifier on each resolution sheet. See
+`printing_service\README.md` for setup and configuration.

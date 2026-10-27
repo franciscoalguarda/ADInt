@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Printed exam sheets</title>
+</head>
+<body>
+  <main>
+    <h1>Printed exam sheets</h1>
+    {% if exams %}
+    <table>
+      <thead>
+        <tr>
+          <th>Exam ID</th>
+          <th>Course</th>
+          <th>Date</th>
+          <th>Students</th>
+          <th>PDF</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in exams %}
+        <tr>
+          <td>{{ row.exam.id }}</td>
+          <td>{{ row.exam.course }}</td>
+          <td>{{ row.exam.exam_date.isoformat() }}</td>
+          <td>{{ row.sheet_count }}</td>
+          <td><a href="{{ url_for('download_exam_pdf', exam_id=row.exam.id) }}">Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No exam sheets have been printed yet.</p>
+    {% endif %}
+  </main>
+</body>
+</html>

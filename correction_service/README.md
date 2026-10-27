@@ -39,10 +39,10 @@ As respostas sem professor atribuído também podem ser corrigidas.
 
 ## Processamento e correção
 
-- Cada folha tem quatro questões, pela ordem 1–4. Nos exemplos de cinco páginas
-  do ZIP, ignora-se a primeira e usam-se as páginas 2–5.
-- Aceitam-se lotes de `4 × n` páginas de respostas, com uma página introdutória
-  opcional no início (`4 × n + 1`). Outros totais são rejeitados.
+- Cada folha tem quatro questões, pela ordem 1–4. Os PDFs produzidos pelo
+  Printing Service contêm exatamente `4 × n` páginas. Também se aceitam os
+  exemplos de cinco páginas do ZIP, ignorando a primeira página introdutória
+  (`4 × n + 1`). Outros totais são rejeitados.
 - O PDF original é preservado. As páginas usadas para correção são guardadas
   como PDF e PNG, com os QR codes detetados cobertos a cinzento.
 - A nota deve ser finita e não negativa, sem máximo definido. O comentário é
