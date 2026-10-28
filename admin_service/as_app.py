@@ -76,6 +76,9 @@ def create_app(database_url=None, printing_rpc_url=None):
                 except ValueError as error:
                     raise ValueError("Enter a valid exam date.") from error
 
+                if exam_date < date.today():
+                    raise ValueError("Exam date cannot be in the past.")
+
                 session_factory = current_app.extensions["admin_session_factory"]
                 with session_factory.begin() as session:
                     session.add(Exam(date=exam_date, course=course))

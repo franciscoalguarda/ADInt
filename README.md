@@ -129,29 +129,31 @@ Os testes usam bases de dados e diretórios temporários:
 .\.venv\Scripts\python.exe -m unittest discover -s correction_service -p "test*.py" -v
 ```
 
-## Limpar bases de dados e caches
+## Limpar bases de dados, caches e PDFs gerados
 
-Parar os quatro serviços e executar, na raiz do projeto:
+Parar os serviços que serão limpos e executar, na raiz do projeto:
 
-```powershell
-python clean.py
-```
+| Limpeza | Comando |
+| --- | --- |
+| Bases de dados, caches e output dos quatro serviços | `python clean.py` |
+| Apenas bases de dados dos quatro serviços | `python clean.py --databases-only` |
+| Bases de dados, caches e output de um serviço | `python clean.py --service NOME_DO_SERVICO` |
+| Apenas a base de dados de um serviço | `python clean.py --databases-only --service NOME_DO_SERVICO` |
+| Apenas a pasta `printing_service/output` | `python clean.py --output-only` |
 
-O script elimina os ficheiros `.sqlite`, os seus ficheiros auxiliares
-(`-wal`, `-shm` e `-journal`) e as pastas `__pycache__` dos quatro serviços.
-Os dados guardados nas bases de dados são apagados. As bases de dados são
-recriadas no próximo arranque dos serviços e as caches quando necessárias.
-O ambiente virtual, o código, o template PDF e os PDFs em `printing_service/output`
-são preservados.
+Substituir `NOME_DO_SERVICO` pelo *nome do serviço*: `user_service`,
+`admin_service`, `printing_service` ou `correction_service`.
+A opção `--service` pode ser repetida para selecionar vários serviços.
+Acrescentar `--dry-run` a qualquer comando para simular sem apagar ficheiros.
 
-Para ver os caminhos que seriam eliminados, sem apagar ficheiros:
+A limpeza de bases de dados apaga os dados e os ficheiros auxiliares SQLite.
+As caches são as pastas `__pycache__`; o output aplica-se apenas ao Printing
+Service. `--output-only` preserva os PDFs guardados na base de dados e não pode
+ser combinado com `--databases-only` ou com outro serviço.
 
-```powershell
-python clean.py --dry-run
-```
-
-O script usa a sua própria localização para encontrar os serviços, pelo que
-também pode ser invocado a partir de outra pasta através do caminho completo.
+O código, o ambiente virtual e o `Exam-template.pdf` são preservados.
+As bases de dados, caches e output são recriados quando necessários.
+Diretórios personalizados com `PRINTING_OUTPUT_DIR` não são limpos.
 
 ## Âmbito da Parte 1
 

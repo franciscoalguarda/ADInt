@@ -2,7 +2,7 @@ import csv
 import io
 
 from flask import Flask, redirect, render_template, request, url_for
-from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlalchemy.exc import IntegrityError
 from os import path
@@ -25,14 +25,10 @@ Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 # session = Session()
 
-'''
-    Database access functions
-'''
+# Database access functions
 ROLES = ["Administrator", "Professor", "Exam invigilator", "Student"]
 
-'''
-    Function to create default roles in the database if they do not already exist.
-'''
+# Function to create default roles in the database if they do not already exist.
 def create_roles():
     with Session.begin() as session:
         for role_name in ROLES:

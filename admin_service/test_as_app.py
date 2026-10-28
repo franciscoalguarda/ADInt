@@ -1,7 +1,7 @@
 import io
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from xmlrpc.client import dumps
@@ -25,6 +25,7 @@ class AdminServiceTests(unittest.TestCase):
         )
         self.app.config.update(TESTING=True)
         self.client = self.app.test_client()
+        self.exam_date = date.today() + timedelta(days=7)
 
     def tearDown(self):
         # Close SQLite handles before removing the temporary database directory.
@@ -35,7 +36,7 @@ class AdminServiceTests(unittest.TestCase):
         """Create a common exam fixture through the public scheduling route."""
         response = self.client.post(
             "/exams/schedule",
-            data={"course": "Algorithms", "date": "2026-11-01"},
+            data={"course": "Algorithms", "date": self.exam_date.isoformat()},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -50,7 +51,7 @@ class AdminServiceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Algorithms", response.data)
-        self.assertIn(b"2026-11-01", response.data)
+        self.assertIn(self.exam_date.isoformat().encode(), response.data)
 
     def test_rejects_invalid_exam_date(self):
         """Invalid dates are reported instead of being stored."""
@@ -77,6 +78,38 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Algorithms", response.data)
         self.assertIn(b">10<", response.data)
         self.assertIn(b">20<", response.data)
+
+    def test_past_exam_date_is_rejected_without_saving(self):
+        today = date(2030, 1, 15)
+        past_date = (today - timedelta(days=1)).isoformat()
+        with patch("as_app.date", wraps=date) as server_date:
+            server_date.today.return_value = today
+            response = self.client.post(
+                "/exams/schedule",
+                data={"course": "Algorithms", "date": past_date},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Location", response.headers)
+        self.assertIn(b"Exam date cannot be in the past.", response.data)
+        self.assertIn(b'value="Algorithms"', response.data)
+        self.assertIn(f'value="{past_date}"'.encode(), response.data)
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertIsNone(session.scalar(select(Exam.id)))
+
+    def test_exam_can_be_scheduled_for_today(self):
+        today = date(2030, 1, 15)
+        with patch("as_app.date", wraps=date) as server_date:
+            server_date.today.return_value = today
+            response = self.client.post(
+                "/exams/schedule",
+                data={"course": "Algorithms", "date": today.isoformat()},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/exams")
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertEqual(session.get(Exam, 1).date, today)
 
     def test_duplicate_ids_reject_entire_upload(self):
         """Duplicate IDs within one CSV cause the whole upload to be rejected."""
@@ -143,7 +176,7 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Queued", response.data)
         server_proxy.assert_called_once_with("http://printing.test:5003")
         proxy.__enter__.return_value.print_exam.assert_called_once_with(
-            str(exam_id), "2026-11-01", "Algorithms", ["10", "20"]
+            str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10", "20"]
         )
 
     def test_printing_order_supports_64bit_identifiers(self):
@@ -153,7 +186,7 @@ class AdminServiceTests(unittest.TestCase):
         session_factory = self.app.extensions["admin_session_factory"]
         with session_factory.begin() as session:
             session.add(Exam(
-                id=exam_id, date=date(2026, 11, 1), course="Algorithms"
+                id=exam_id, date=self.exam_date, course="Algorithms"
             ))
             session.flush()
             session.add_all(
@@ -175,7 +208,7 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Queued", response.data)
         proxy.__enter__.return_value.print_exam.assert_called_once_with(
-            str(exam_id), "2026-11-01", "Algorithms",
+            str(exam_id), self.exam_date.isoformat(), "Algorithms",
             [str(student_id) for student_id in student_ids],
         )
 
