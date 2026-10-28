@@ -9,21 +9,21 @@ dados SQLite e pode ser iniciado separadamente.
 Na raiz do repositório, criar o ambiente virtual e instalar as dependências:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r user_service\requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r admin_service\requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r printing_service\requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r correction_service\requirements.txt
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install -r user_service\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r admin_service\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r printing_service\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r correction_service\requirements.txt
 ```
 
 Iniciar cada aplicação numa janela PowerShell diferente, sempre a partir da
 raiz:
 
 ```powershell
-.\.venv\Scripts\python.exe user_service\su_app.py
-.\.venv\Scripts\python.exe admin_service\as_app.py
-.\.venv\Scripts\python.exe printing_service\ps_app.py
-.\.venv\Scripts\python.exe correction_service\cs_app.py
+.\venv\Scripts\python.exe user_service\su_app.py
+.\venv\Scripts\python.exe admin_service\as_app.py
+.\venv\Scripts\python.exe printing_service\ps_app.py
+.\venv\Scripts\python.exe correction_service\cs_app.py
 ```
 
 | Serviço | URL | Base de dados |
@@ -66,14 +66,24 @@ de dados dos serviços.
 
 | Endpoint | Métodos | Funcionalidade |
 | --- | --- | --- |
-| `/` | GET | Resumo do serviço. |
+| `/` | GET | Resumo de exames e inscrições, cartões de ação e guia de preparação. |
 | `/exams/schedule` | GET, POST | AD_1: agendar um exame. |
 | `/exams` | GET | Listar exames e aceder às ações de inscrição/impressão. |
+| `/exams/success` | GET | Confirmar o agendamento de um exame. |
 | `/exams/<exam_id>/enroll` | GET, POST | AD_2: inscrever alunos por CSV. |
 | `/enrollments` | GET | ST_1: listar inscrições e respetivos exames. |
+| `/enrollments/success` | GET | Confirmar a inscrição de alunos. |
 | `/exams/<exam_id>/order-printing` | POST | AD_3: enviar pedido XML-RPC. |
+| `/exams/printing/success` | GET | Confirmar o pedido de impressão. |
 
 Modelos SQLAlchemy em `admin_service/admin_data.py`: `Exam` e `Enrollment`.
+`Exam` contém apenas `id`, `date` e `course`; `Enrollment`, `exam_id` e `student_id`.
+Inscrever alunos apenas guarda as inscrições. A ação `Order printing` gera
+ou atualiza o PDF com todos os alunos inscritos nesse momento, através de
+`print_exam` por XML-RPC.
+Inscrições e impressão são bloqueadas após a data do exame; o próprio dia
+continua permitido. O CSV aceita apenas uma coluna de identificação, `student_id`
+ou `student_identifier`.
 
 ### Printing Service
 
@@ -83,12 +93,18 @@ transporta os identificadores como texto decimal para suportar inteiros de
 gera um único PDF com exatamente quatro páginas por aluno. Cada folha tem um
 identificador único em QR code, igual nas suas quatro páginas. A página web
 lista os exames impressos e disponibiliza os PDFs.
+Pedidos repetidos preservam as folhas e os QR codes existentes. Num novo pedido
+de impressão, novos alunos acrescentam quatro páginas cada um ao PDF; pedidos antigos não
+removem alunos já incluídos. A impressão também é bloqueada por data no
+próprio endpoint XML-RPC.
 
 | Endpoint | Métodos | Funcionalidade |
 | --- | --- | --- |
-| `/` ou `/exams` | GET | Listar exames impressos. |
+| `/` ou `/exams` | GET | Listagem de exames impressos e ligação aos PDFs. |
 | `/RPC2` | POST XML-RPC | Receber pedidos de impressão. |
-| `/exams/<exam_id>/pdf` | GET | Descarregar o PDF do exame. |
+| `/exams/<exam_id>/pdf` | GET | Visualizar o PDF do exame no navegador. |
+| `/exams/<exam_id>/pdf/save` | POST | Guardar o PDF atual em `printing_service/output`. |
+| `/exams/pdf/saved` | GET | Confirmar a gravação do PDF e apresentar a listagem. |
 
 O PDF usa `printing_service\Exam-template.pdf`. O serviço usa
 Flask-XML-RPC-Reloaded, um fork compatível com Python 3 da extensão
@@ -126,10 +142,10 @@ Modelos SQLAlchemy em `correction_service/correction_data.py`:
 Os testes usam bases de dados e diretórios temporários:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s user_service -p "test*.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s admin_service -p "test*.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s printing_service -p "test*.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s correction_service -p "test*.py" -v
+.\venv\Scripts\python.exe -m unittest discover -s user_service -p "test*.py" -v
+.\venv\Scripts\python.exe -m unittest discover -s admin_service -p "test*.py" -v
+.\venv\Scripts\python.exe -m unittest discover -s printing_service -p "test*.py" -v
+.\venv\Scripts\python.exe -m unittest discover -s correction_service -p "test*.py" -v
 ```
 
 ## Limpar bases de dados, caches e PDFs gerados

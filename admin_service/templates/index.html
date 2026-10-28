@@ -1,11 +1,128 @@
-{# Landing page with summary counts supplied by the index route. #}
 {% extends "layout.html" %}
-{% block title %}Admin Service{% endblock %}
+
+{% block title %}Overview — Admin Service{% endblock %}
+{% block body_class %}admin-home{% endblock %}
+
+{% block page_styles %}
+  <style>
+    .admin-home { background: #f4f7fb; max-width: 1080px; }
+    .admin-home header h1 { font-size: 1.25rem; letter-spacing: -.03em; }
+    .admin-dashboard { display: grid; gap: 1.75rem; padding: .5rem 0 1.5rem; }
+    .admin-dashboard h2, .admin-dashboard h3, .admin-dashboard p, .admin-dashboard dl { margin: 0; }
+    .admin-eyebrow { color: #0759a5; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .admin-intro h2 { margin: .5rem 0 .65rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; letter-spacing: -.045em; }
+    .admin-description { color: #596575; max-width: 40rem; }
+    .admin-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+    .admin-stat { padding: 1.25rem 1.5rem; border: 1px solid #dce4ee; border-radius: .85rem; background: white; }
+    .admin-stat dt { color: #596575; font-size: .85rem; }
+    .admin-stat dd { margin: .6rem 0 0; color: #123963; font-size: 2.5rem; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .admin-stat--enrollments { background: #eaf2fc; border-color: #d0e0f4; }
+    .admin-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .admin-card { display: flex; flex-direction: column; align-items: flex-start; gap: .8rem; padding: 1.5rem; border: 1px solid #dce4ee; border-radius: 1rem; background: white; color: #20242a; text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+    .admin-card:hover { border-color: #7ba6d2; box-shadow: 0 6px 20px #173d6510; }
+    .admin-dashboard a:focus-visible { outline: 3px solid #0759a5; outline-offset: 4px; }
+    .admin-icon { display: grid; place-items: center; width: 2.8rem; height: 2.8rem; border-radius: .8rem; background: #eaf2fc; color: #0759a5; }
+    .admin-icon svg { width: 1.5rem; height: 1.5rem; }
+    .admin-card h3 { font-size: 1.1rem; letter-spacing: -.02em; }
+    .admin-card p { color: #596575; font-size: .9rem; }
+    .admin-card-action { margin-top: auto; padding-top: .7rem; color: #0759a5; font-size: .9rem; font-weight: 600; }
+    .admin-empty { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; padding: 1.4rem 1.5rem; background: #eaf2fc; border: 1px solid #d0e0f4; border-radius: 1rem; }
+    .admin-empty h3 { font-size: 1.1rem; margin-bottom: .35rem; }
+    .admin-empty p { color: #455c76; font-size: .9rem; max-width: 38rem; }
+    .admin-button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.75rem; box-sizing: border-box; padding: .6rem 1rem; border-radius: .65rem; background: #0759a5; color: white; font-size: .9rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .admin-button:hover { background: #064780; }
+    .admin-guide { padding: 1.4rem 1.5rem; border: 1px solid #dce4ee; border-radius: 1rem; background: white; }
+    .admin-guide h3 { font-size: 1.1rem; }
+    .admin-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; list-style: none; padding: 0; margin: 1.25rem 0 0; counter-reset: exam-step; }
+    .admin-steps li { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: .75rem; counter-increment: exam-step; }
+    .admin-steps li::before { content: counter(exam-step); display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #eaf2fc; color: #0759a5; font-size: .85rem; font-weight: 700; }
+    .admin-steps strong { display: block; margin-bottom: .3rem; font-size: .9rem; }
+    .admin-steps p { color: #596575; font-size: .85rem; }
+    .admin-steps code { overflow-wrap: anywhere; }
+    @media (max-width: 700px) {
+      .admin-actions, .admin-steps { grid-template-columns: 1fr; }
+      .admin-empty { flex-direction: column; align-items: stretch; }
+    }
+    @media (max-width: 360px) {
+      .admin-stats { grid-template-columns: 1fr; }
+      .admin-card, .admin-guide, .admin-empty { padding: 1.1rem; }
+      .admin-button { white-space: normal; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .admin-card { transition: none; }
+    }
+  </style>
+{% endblock %}
+
 {% block content %}
-  <h2>Exam management</h2>
-  <p>Schedule exams, enroll students in bulk, and order exam resolution sheets.</p>
-  <ul>
-    <li>{{ exam_count }} scheduled exam(s)</li>
-    <li>{{ enrollment_count }} student enrollment(s)</li>
-  </ul>
+  <div class="admin-dashboard">
+    <section class="admin-intro" aria-labelledby="overview-title">
+      <p class="admin-eyebrow">National exams · Exam administration</p>
+      <h2 id="overview-title">Manage your exams</h2>
+      <p class="admin-description">Schedule exams, organize student enrollments and prepare resolution sheets.</p>
+    </section>
+
+    <dl class="admin-stats" aria-label="Exam overview">
+      <div class="admin-stat">
+        <dt>Scheduled exams</dt>
+        <dd id="exam-count">{{ exam_count }}</dd>
+      </div>
+      <div class="admin-stat admin-stat--enrollments">
+        <dt>Student enrollments</dt>
+        <dd id="enrollment-count">{{ enrollment_count }}</dd>
+      </div>
+    </dl>
+
+    {% if not exam_count %}
+      <section class="admin-empty" id="empty-state" aria-labelledby="empty-title">
+        <div>
+          <h3 id="empty-title">No exams scheduled yet</h3>
+          <p>Create your first exam to start enrolling students and preparing resolution sheets.</p>
+        </div>
+        <a class="admin-button" href="{{ url_for('schedule_exam') }}">Schedule your first exam</a>
+      </section>
+    {% endif %}
+
+    <section class="admin-actions" aria-label="Exam management actions">
+      <a class="admin-card" href="{{ url_for('schedule_exam') }}">
+        <span class="admin-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18M12 14v4M10 16h4"/>
+          </svg>
+        </span>
+        <h3>Schedule an exam</h3>
+        <p>Choose the course and date for a new exam.</p>
+        <span class="admin-card-action">Create exam <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="admin-card" href="{{ url_for('list_exams') }}">
+        <span class="admin-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/>
+          </svg>
+        </span>
+        <h3>Manage exams</h3>
+        <p>Browse scheduled exams, enroll students and order resolution sheets.</p>
+        <span class="admin-card-action">View exams <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="admin-card" href="{{ url_for('list_enrollments') }}">
+        <span class="admin-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 21v-2a6 6 0 0 0-4-5.65"/>
+          </svg>
+        </span>
+        <h3>Student enrollments</h3>
+        <p>Check which students are enrolled in each exam.</p>
+        <span class="admin-card-action">View enrollments <span aria-hidden="true">→</span></span>
+      </a>
+    </section>
+
+    <section class="admin-guide" aria-labelledby="guide-title">
+      <h3 id="guide-title">From scheduling to printing</h3>
+      <ol class="admin-steps">
+        <li><div><strong>Schedule</strong><p>Create an exam with its course and date.</p></div></li>
+        <li><div><strong>Enroll</strong><p>Choose an exam and upload a CSV with a <code>student_id</code> column.</p></div></li>
+        <li><div><strong>Print</strong><p>Order the resolution sheets once students are enrolled.</p></div></li>
+      </ol>
+    </section>
+  </div>
 {% endblock %}

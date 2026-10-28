@@ -10,8 +10,10 @@ from flask_xmlrpcre import Fault, XMLRPCHandler
 from flask import (
     Flask,
     abort,
+    redirect,
     render_template,
     send_file,
+    url_for,
 )
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
@@ -98,6 +100,34 @@ def create_exam_pdf(template_path, sheet_ids):
             document.close()
 
 
+def write_pdf_copy(output_dir, exam_id, contents):
+    output_dir = Path(output_dir)
+    output_path = output_dir / f"exam_{exam_id}.pdf"
+    temporary_path = None
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=output_dir, suffix=".pdf", delete=False
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(contents)
+        temporary_path.replace(output_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return output_path
+
+
+def get_exam_or_404(session, exam_id):
+    if not 0 < exam_id <= MAX_IDENTIFIER:
+        abort(404)
+    exam = session.get(PrintedExam, exam_id)
+    if exam is None:
+        abort(404)
+    return exam
+
+
 def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLATE_PATH):
     output_dir = Path(output_dir)
     template_path = Path(template_path)
@@ -113,6 +143,8 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
             raise Fault(1, "exam_date must use the YYYY-MM-DD format.") from error
         if parsed_date.isoformat() != exam_date:
             raise Fault(1, "exam_date must use the YYYY-MM-DD format.")
+        if parsed_date < date.today():
+            raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
 
         if not isinstance(course, str) or not course.strip():
             raise Fault(1, "course is required.")
@@ -127,47 +159,39 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
         if len(student_ids) != len(set(student_ids)):
             raise Fault(1, "student_ids must not contain duplicates.")
 
-        output_path = output_dir / f"exam_{exam_id}.pdf"
-        temporary_path = None
-        try:
-            with session_factory.begin() as session:
-                exam = session.get(PrintedExam, exam_id)
-                if exam is None:
-                    exam = PrintedExam(
-                        id=exam_id,
-                        exam_date=parsed_date,
-                        course=course,
-                        pdf_file=b"",
-                    )
-                    session.add(exam)
-                else:
-                    exam.exam_date = parsed_date
-                    exam.course = course
-                    exam.sheets.clear()
-
-                session.flush()
-                exam.sheets.extend(
-                    ResolutionSheet(student_id=student_id)
-                    for student_id in student_ids
+        with session_factory.begin() as session:
+            if session.bind.dialect.name == "sqlite":
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            exam = session.get(PrintedExam, exam_id)
+            changed = exam is None
+            if exam is None:
+                exam = PrintedExam(
+                    id=exam_id,
+                    exam_date=parsed_date,
+                    course=course,
+                    pdf_file=b"",
                 )
-                session.flush()
-                pdf_contents = create_exam_pdf(
+                session.add(exam)
+            else:
+                if exam.exam_date < date.today():
+                    raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
+                changed = exam.exam_date != parsed_date or exam.course != course
+                exam.exam_date = parsed_date
+                exam.course = course
+
+            existing_students = {sheet.student_id for sheet in exam.sheets}
+            for student_id in student_ids:
+                if student_id not in existing_students:
+                    exam.sheets.append(ResolutionSheet(student_id=student_id))
+                    changed = True
+            session.flush()
+            if changed or not exam.pdf_file:
+                exam.pdf_file = create_exam_pdf(
                     template_path, [sheet.id for sheet in exam.sheets]
                 )
-                exam.pdf_file = pdf_contents
 
-                output_dir.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    dir=output_dir, suffix=".pdf", delete=False
-                ) as temporary_file:
-                    temporary_file.write(pdf_contents)
-                    temporary_path = Path(temporary_file.name)
-
-            temporary_path.replace(output_path)
-            temporary_path = None
-        finally:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+            # Publish before releasing the write transaction to preserve the latest copy.
+            output_path = write_pdf_copy(output_dir, exam_id, exam.pdf_file)
 
         return f"Generated PDF: {output_path.resolve()}"
 
@@ -212,6 +236,9 @@ def create_app(database_url=None, output_dir=None, template_path=DEFAULT_TEMPLAT
     @app.get("/")
     @app.get("/exams")
     def list_exams():
+        return render_exams()
+
+    def render_exams(error=None, success=None):
         with session_factory() as session:
             exams = session.scalars(
                 select(PrintedExam).order_by(PrintedExam.exam_date, PrintedExam.id)
@@ -223,20 +250,36 @@ def create_app(database_url=None, output_dir=None, template_path=DEFAULT_TEMPLAT
                 }
                 for exam in exams
             ]
-        return render_template("index.html", exams=rows)
+        return render_template("index.html", exams=rows, error=error, success=success)
 
     @app.get("/exams/<int:exam_id>/pdf")
-    def download_exam_pdf(exam_id):
+    def view_exam_pdf(exam_id):
         with session_factory() as session:
-            exam = session.get(PrintedExam, exam_id)
-            if exam is None:
-                abort(404)
+            exam = get_exam_or_404(session, exam_id)
             contents = exam.pdf_file
         return send_file(
             BytesIO(contents),
             mimetype="application/pdf",
             download_name=f"exam_{exam_id}.pdf",
         )
+
+    @app.post("/exams/<int:exam_id>/pdf/save")
+    def save_exam_pdf(exam_id):
+        try:
+            with session_factory.begin() as session:
+                # Serialize saves with printing orders so an older PDF cannot overwrite a newer one.
+                if session.bind.dialect.name == "sqlite":
+                    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                exam = get_exam_or_404(session, exam_id)
+                write_pdf_copy(app.config["OUTPUT_DIR"], exam_id, exam.pdf_file)
+        except OSError:
+            app.logger.exception("Could not save PDF to the output folder.")
+            return render_exams(error="Could not save the PDF to the output folder. Please try again."), 500
+        return redirect(url_for("save_pdf_success"))
+
+    @app.get("/exams/pdf/saved")
+    def save_pdf_success():
+        return render_exams(success="PDF saved to the output folder.")
 
     return app
 

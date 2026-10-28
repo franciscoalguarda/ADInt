@@ -1,6 +1,8 @@
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from xmlrpc.client import Fault, ServerProxy
@@ -21,6 +23,7 @@ class PrintingServiceTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        self.exam_date = date.today() + timedelta(days=7)
         self.output_dir = self.root / "pdfs"
         self.database_url = f"sqlite:///{(self.root / 'printing.sqlite').as_posix()}"
         self.app = create_app(database_url=self.database_url, output_dir=self.output_dir)
@@ -51,7 +54,7 @@ class PrintingServiceTests(unittest.TestCase):
     def test_print_exam_creates_four_answer_pages_per_student(self):
         with patch("qrcode.make", wraps=qrcode.make) as qr_factory:
             result = self.proxy.print_exam(
-                12, "2026-11-01", "Algorithms", [10, 20]
+                12, self.exam_date.isoformat(), "Algorithms", [10, 20]
             )
 
         pdf_path = self.output_dir / "exam_12.pdf"
@@ -72,7 +75,7 @@ class PrintingServiceTests(unittest.TestCase):
                 .where(ResolutionSheet.exam_id == 12)
                 .order_by(ResolutionSheet.id)
             ).all()
-            self.assertEqual(exam.exam_date.isoformat(), "2026-11-01")
+            self.assertEqual(exam.exam_date, self.exam_date)
             self.assertEqual(exam.course, "Algorithms")
             self.assertEqual([sheet.student_id for sheet in sheets], [10, 20])
             self.assertEqual(len({sheet.id for sheet in sheets}), 2)
@@ -92,22 +95,83 @@ class PrintingServiceTests(unittest.TestCase):
                 )
 
     def test_web_page_lists_exams_and_serves_saved_pdf(self):
-        self.proxy.print_exam(12, "2026-11-01", "Algorithms", [10])
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
 
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Algorithms", response.data)
-        self.assertIn(b"2026-11-01", response.data)
+        self.assertIn(self.exam_date.isoformat().encode(), response.data)
         self.assertIn(b"1", response.data)
+        self.assertIn(b'href="/exams/12/pdf"', response.data)
+        self.assertIn(b'action="/exams/12/pdf/save"', response.data)
+        self.assertIn(b"Open PDF", response.data)
+        self.assertIn(b"Save to output", response.data)
 
         response = self.client.get("/exams/12/pdf")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "application/pdf")
         self.assertTrue(response.data.startswith(b"%PDF-"))
+        self.assertEqual(response.headers["Content-Disposition"], "inline; filename=exam_12.pdf")
         self.assertEqual(self.client.get("/exams/999/pdf").status_code, 404)
+        self.assertEqual(self.client.post("/exams/999/pdf/save").status_code, 404)
 
-    def test_reprinting_replaces_exam_and_never_reuses_sheet_identifiers(self):
-        self.proxy.print_exam(12, "2026-11-01", "Algorithms", [10, 20])
+    def test_pdf_urls_reject_out_of_range_ids_and_accept_the_largest_id(self):
+        for identifier in (0, -1, 2**63, 10**100):
+            for method, suffix in (("GET", ""), ("POST", "/save")):
+                with self.subTest(identifier=identifier, method=method):
+                    self.assertEqual(self.client.open(f"/exams/{identifier}/pdf{suffix}", method=method).status_code, 404)
+
+        exam_id = 2**63 - 1
+        self.proxy.print_exam(str(exam_id), self.exam_date.isoformat(), "Algorithms", [10])
+        response = self.client.get(f"/exams/{exam_id}/pdf")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data.startswith(b"%PDF-"))
+        self.assertEqual(self.client.post(f"/exams/{exam_id}/pdf/save").status_code, 302)
+        self.assertEqual((self.output_dir / f"exam_{exam_id}.pdf").read_bytes(), response.data)
+
+    def test_save_to_output_restores_the_latest_pdf_without_regenerating_sheets(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        original_pdf = self.client.get("/exams/12/pdf").data
+        with self.app.extensions["printing_session_factory"]() as session:
+            original_ids = [sheet.id for sheet in session.get(PrintedExam, 12).sheets]
+        output_path = self.output_dir / "exam_12.pdf"
+        output_path.unlink()
+        self.output_dir.rmdir()
+
+        module_name = create_app.__module__
+        with patch(f"{module_name}.create_exam_pdf", side_effect=AssertionError("Must use stored PDF")):
+            response = self.client.post("/exams/12/pdf/save", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.history[0].status_code, 302)
+        self.assertEqual(response.request.path, "/exams/pdf/saved")
+        self.assertIn(b"PDF saved to the output folder.", response.data)
+        self.assertNotIn("Content-Disposition", response.headers)
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertEqual(output_path.read_bytes(), original_pdf)
+        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+        with self.app.extensions["printing_session_factory"]() as session:
+            self.assertEqual([sheet.id for sheet in session.get(PrintedExam, 12).sheets], original_ids)
+        output_path.write_bytes(b"Outdated copy")
+        self.assertEqual(self.client.post("/exams/12/pdf/save").status_code, 302)
+        self.assertEqual(output_path.read_bytes(), original_pdf)
+        self.assertEqual(self.client.get("/exams/12/pdf/save").status_code, 405)
+
+    def test_save_to_output_failure_preserves_the_pdf_and_reports_an_error(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+        original_pdf = self.client.get("/exams/12/pdf").data
+        with patch.object(Path, "replace", side_effect=OSError("Cannot replace output file")):
+            with self.assertLogs(self.app.logger, level="ERROR"):
+                response = self.client.post("/exams/12/pdf/save")
+        self.assertEqual(response.status_code, 500)
+        self.assertIn(b"Could not save the PDF to the output folder.", response.data)
+        self.assertNotIn(b"PDF saved to the output folder.", response.data)
+        self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), original_pdf)
+        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+        self.assertEqual(list(self.output_dir.glob("*.pdf")), [self.output_dir / "exam_12.pdf"])
+
+    def test_printing_metadata_changes_preserve_existing_resolution_sheets(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
         session_factory = self.app.extensions["printing_session_factory"]
         with session_factory() as session:
             old_ids = set(
@@ -116,7 +180,8 @@ class PrintingServiceTests(unittest.TestCase):
                 ).all()
             )
 
-        self.proxy.print_exam(12, "2026-11-02", "Databases", [30])
+        new_date = self.exam_date + timedelta(days=1)
+        self.proxy.print_exam(12, new_date.isoformat(), "Databases", [30])
 
         with session_factory() as session:
             exam = session.get(PrintedExam, 12)
@@ -124,21 +189,103 @@ class PrintingServiceTests(unittest.TestCase):
                 select(ResolutionSheet).where(ResolutionSheet.exam_id == 12)
             ).all()
             self.assertEqual(exam.course, "Databases")
-            self.assertEqual(exam.exam_date.isoformat(), "2026-11-02")
-            self.assertEqual([sheet.student_id for sheet in sheets], [30])
-            self.assertTrue(old_ids.isdisjoint({sheet.id for sheet in sheets}))
+            self.assertEqual(exam.exam_date, new_date)
+            self.assertEqual([sheet.student_id for sheet in sheets], [10, 20, 30])
+            self.assertTrue(old_ids.issubset({sheet.id for sheet in sheets}))
             with pymupdf.open(stream=exam.pdf_file, filetype="pdf") as document:
-                self.assertEqual(document.page_count, 4)
+                self.assertEqual(document.page_count, 12)
 
     def test_invalid_exam_date_is_rejected(self):
         with self.assertRaises(Fault):
             self.proxy.print_exam(12, "2026-02-30", "Algorithms", [10])
 
+    def test_repeated_order_preserves_qr_identifiers_and_pdf_bytes(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        original_pdf = self.client.get("/exams/12/pdf").data
+        factory = self.app.extensions["printing_session_factory"]
+        with factory() as session:
+            original_ids = {sheet.student_id: sheet.id for sheet in session.get(PrintedExam, 12).sheets}
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [20, 10])
+        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+        self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), original_pdf)
+        with factory() as session:
+            self.assertEqual({sheet.student_id: sheet.id for sheet in session.get(PrintedExam, 12).sheets}, original_ids)
+            for identifier in original_ids.values():
+                self.assertIsNotNone(session.get(ResolutionSheet, identifier))
+
+    def test_pdf_grows_from_eight_to_sixteen_pages_and_stale_orders_keep_all_students(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        factory = self.app.extensions["printing_session_factory"]
+        with factory() as session:
+            original_ids = {sheet.student_id: sheet.id for sheet in session.get(PrintedExam, 12).sheets}
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20, 30, 40])
+        expanded_pdf = self.client.get("/exams/12/pdf").data
+        with pymupdf.open(stream=expanded_pdf, filetype="pdf") as document:
+            self.assertEqual(document.page_count, 16)
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        self.assertEqual(self.client.get("/exams/12/pdf").data, expanded_pdf)
+        with factory() as session:
+            ids = {sheet.student_id: sheet.id for sheet in session.get(PrintedExam, 12).sheets}
+            self.assertEqual(set(ids), {10, 20, 30, 40})
+            self.assertEqual({student: ids[student] for student in original_ids}, original_ids)
+            self.assertEqual(len(set(ids.values())), 4)
+
+    def test_printing_is_allowed_today_and_rejected_after_the_exam_date(self):
+        module_name = create_app.__module__
+        with patch(f"{module_name}.date", wraps=date) as server_date:
+            server_date.today.return_value = self.exam_date
+            self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+            original_pdf = self.client.get("/exams/12/pdf").data
+            server_date.today.return_value = self.exam_date + timedelta(days=1)
+            for identifier, supplied_date in ((12, self.exam_date), (13, self.exam_date), (12, self.exam_date + timedelta(days=7))):
+                with self.subTest(exam_id=identifier, supplied_date=supplied_date):
+                    with self.assertRaisesRegex(Fault, "cannot be printed after the exam date"):
+                        self.proxy.print_exam(identifier, supplied_date.isoformat(), "Algorithms", [10, 20])
+        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+        with self.app.extensions["printing_session_factory"]() as session:
+            self.assertIsNone(session.get(PrintedExam, 13))
+            self.assertEqual([sheet.student_id for sheet in session.get(PrintedExam, 12).sheets], [10])
+
+    def test_failed_pdf_copy_keeps_previous_pdf_and_qr_identifiers(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+        original_pdf = self.client.get("/exams/12/pdf").data
+        with self.app.extensions["printing_session_factory"]() as session:
+            identifier = session.get(PrintedExam, 12).sheets[0].id
+        with patch.object(Path, "replace", side_effect=OSError("Cannot replace output file")):
+            with self.assertLogs(self.server.app.logger, level="ERROR"):
+                with self.assertRaises(Fault):
+                    self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+        self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), original_pdf)
+        with self.app.extensions["printing_session_factory"]() as session:
+            self.assertEqual([(sheet.student_id, sheet.id) for sheet in session.get(PrintedExam, 12).sheets], [(10, identifier)])
+        self.assertEqual(list(self.output_dir.glob("*.pdf")), [self.output_dir / "exam_12.pdf"])
+
+    def test_concurrent_orders_preserve_existing_students_and_publish_the_latest_pdf(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+        with self.app.extensions["printing_session_factory"]() as session:
+            original_id = session.get(PrintedExam, 12).sheets[0].id
+        def submit(students):
+            with ServerProxy(f"http://127.0.0.1:{self.server.server_address[1]}") as proxy:
+                return proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", students)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(submit, ([10, 20], [10, 30])))
+        self.assertTrue(all("exam_12.pdf" in result for result in results))
+        with self.app.extensions["printing_session_factory"]() as session:
+            exam = session.get(PrintedExam, 12)
+            ids = {sheet.student_id: sheet.id for sheet in exam.sheets}
+            self.assertEqual(set(ids), {10, 20, 30})
+            self.assertEqual(ids[10], original_id)
+            contents = exam.pdf_file
+        self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), contents)
+        with pymupdf.open(stream=contents, filetype="pdf") as document:
+            self.assertEqual(document.page_count, 12)
+
     def test_decimal_strings_support_64bit_exam_and_student_identifiers(self):
         exam_id = 2**63 - 1
         student_ids = [2**31, 2**63 - 1]
         self.proxy.print_exam(
-            str(exam_id), "2026-11-01", "Algorithms",
+            str(exam_id), self.exam_date.isoformat(), "Algorithms",
             [str(student_id) for student_id in student_ids],
         )
         with self.app.extensions["printing_session_factory"]() as session:
@@ -153,22 +300,22 @@ class PrintingServiceTests(unittest.TestCase):
         for identifier in ("0", "-1", "1.5", "abc", str(2**63), True, 1.5):
             with self.subTest(identifier=identifier, field="exam_id"):
                 with self.assertRaises(Fault):
-                    self.proxy.print_exam(identifier, "2026-11-01", "Algorithms", [10])
+                    self.proxy.print_exam(identifier, self.exam_date.isoformat(), "Algorithms", [10])
             with self.subTest(identifier=identifier, field="student_id"):
                 with self.assertRaises(Fault):
-                    self.proxy.print_exam(12, "2026-11-01", "Algorithms", [identifier])
+                    self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [identifier])
         with self.app.extensions["printing_session_factory"]() as session:
             self.assertIsNone(session.scalar(select(PrintedExam.id)))
 
     def test_duplicate_ids_are_detected_after_normalizing_wire_types(self):
         with self.assertRaises(Fault):
-            self.proxy.print_exam("12", "2026-11-01", "Algorithms", [10, "010"])
+            self.proxy.print_exam("12", self.exam_date.isoformat(), "Algorithms", [10, "010"])
         with self.app.extensions["printing_session_factory"]() as session:
             self.assertIsNone(session.get(PrintedExam, 12))
 
     def test_duplicate_student_ids_are_rejected_without_creating_exam(self):
         with self.assertRaises(Fault):
-            self.proxy.print_exam(12, "2026-11-01", "Algorithms", [10, 10])
+            self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 10])
 
         self.assertFalse((self.output_dir / "exam_12.pdf").exists())
         with self.app.extensions["printing_session_factory"]() as session:
@@ -179,7 +326,7 @@ class PrintingServiceTests(unittest.TestCase):
             f"http://127.0.0.1:{self.server.server_address[1]}/"
         )
         try:
-            result = root_proxy.print_exam(13, "2026-11-01", "Algorithms", [11])
+            result = root_proxy.print_exam(13, self.exam_date.isoformat(), "Algorithms", [11])
         finally:
             root_proxy.__exit__(None, None, None)
         self.assertIn("exam_13.pdf", result)

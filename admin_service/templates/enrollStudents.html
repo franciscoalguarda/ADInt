@@ -3,6 +3,7 @@
 {% block title %}Enroll students — Admin Service{% endblock %}
 {% block content %}
   <h2>Enroll students — {{ exam.course }} ({{ exam.date.isoformat() }})</h2>
+  {% if not enrollment_closed %}
   <p>Upload a UTF-8 CSV file with a <code>student_id</code> column and one student ID per row.</p>
   <form method="post" enctype="multipart/form-data">
     <label for="file">Student CSV
@@ -10,5 +11,6 @@
     </label>
     <button type="submit">Enroll students</button>
   </form>
+  {% endif %}
   <p><a href="{{ url_for('list_exams') }}">Back to scheduled exams</a></p>
 {% endblock %}
