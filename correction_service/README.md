@@ -43,7 +43,12 @@ uma nota zero também conta como correção. Sem digitalizações, apresenta um
 convite para carregar o primeiro PDF. O layout adapta-se a ecrãs pequenos.
 
 Os identificadores de exame e professor são introduzidos manualmente. Cada
-par exame/questão tem uma atribuição; guardar novamente atualiza o professor.
+par exame/questão tem uma atribuição, e cada professor só pode ficar responsável
+por uma questão por exame. O mesmo professor pode participar noutros exames.
+É possível trocar o professor enquanto não existir nenhuma resposta corrigida
+para esse exame/questão. Depois da primeira correção, incluindo uma nota zero,
+a troca é recusada para preservar a associação das notas ao professor original.
+Repetir a mesma atribuição não altera os dados.
 Só é possível guardar ou editar uma correção depois de atribuir um professor
 ao respetivo par exame/questão. Sem atribuição, a listagem apresenta a opção
 de atribuir professor. O acesso direto à rota de correção, por GET ou POST,
@@ -89,3 +94,6 @@ intervalo e registos inexistentes devolvem 404.
 
 `CORRECTION_DATABASE_URL` permite alterar a ligação à base de dados.
 Por omissão, usa-se o SQLite na pasta do serviço.
+
+As novas bases incluem restrições de unicidade para os pares exame/questão e
+exame/professor.

@@ -1,7 +1,8 @@
 {% extends 'layout.html' %}
 {% block content %}
   <h2>Professor assignments</h2>
-  <p>Each exam question has one professor. Saving an existing exam/question updates its professor.</p>
+  <p>Each exam question has one professor, and each professor can be assigned to only one question per exam.</p>
+  <p>The professor can be changed until an answer to that exam question has been corrected.</p>
   <form method="post" action="{{ url_for('assignments') }}">
     <label>Exam identifier <input name="exam_id" type="number" min="1" max="9223372036854775807" required value="{{ request.form.get('exam_id', '') }}"></label>
     <label>Professor identifier <input name="professor_id" type="number" min="1" max="9223372036854775807" required value="{{ request.form.get('professor_id', '') }}"></label>

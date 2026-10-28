@@ -1,13 +1,17 @@
 import io
+import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
+from threading import Event, current_thread
 from unittest.mock import patch
 
 import cv2
 import numpy as np
 import pymupdf
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 
 if __package__:
@@ -57,9 +61,10 @@ class CorrectionServiceTests(unittest.TestCase):
             content_type="multipart/form-data",
         )
 
-    def assign_professor(self, question_number=1, exam_id=81001):
+    def assign_professor(self, question_number=1, exam_id=81001, professor_id=None):
         response = self.client.post("/assignments", data={
-            "exam_id": str(exam_id), "professor_id": "82001",
+            "exam_id": str(exam_id),
+            "professor_id": str(professor_id if professor_id is not None else 82000 + question_number),
             "question_number": str(question_number),
         })
         self.assertEqual(response.status_code, 302)
@@ -162,6 +167,217 @@ class CorrectionServiceTests(unittest.TestCase):
             assignments = session.scalars(select(ProfessorAssignment)).all()
             self.assertEqual(len(assignments), 1)
             self.assertEqual(assignments[0].question_number, 2)
+
+    def test_professor_cannot_be_assigned_to_another_question_in_the_same_exam(self):
+        self.assign_professor(question_number=1)
+        self.assign_professor(question_number=2)
+        for question_number in (3, 2):
+            with self.subTest(question_number=question_number):
+                response = self.client.post("/assignments", data={
+                    "exam_id": "81001", "professor_id": "82001",
+                    "question_number": str(question_number),
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"This professor is already assigned to another question in this exam.", response.data)
+                self.assertNotIn("Location", response.headers)
+                self.assertNotIn("Set-Cookie", response.headers)
+                self.assertIn(b'value="82001"', response.data)
+                self.assertIn(f'<option value="{question_number}" selected>'.encode(), response.data)
+        with self.session_factory() as session:
+            assignments = session.scalars(select(ProfessorAssignment).order_by(
+                ProfessorAssignment.question_number
+            )).all()
+            self.assertEqual([(row.question_number, row.professor_id) for row in assignments],
+                             [(1, 82001), (2, 82002)])
+
+    def test_same_professor_can_be_assigned_in_different_exams(self):
+        self.assign_professor(question_number=1, professor_id=82001)
+        self.assign_professor(question_number=2, exam_id=81002, professor_id=82001)
+        with self.session_factory() as session:
+            self.assertEqual(len(session.scalars(select(ProfessorAssignment)).all()), 2)
+
+    def test_repeated_assignment_shows_message_without_changing_data(self):
+        self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
+        self.assign_professor()
+        with self.session_factory() as session:
+            assignment_id = session.scalar(select(ProfessorAssignment.id))
+        for grade in (None, "0", "10"):
+            with self.subTest(grade=grade):
+                comment = "" if grade is None else f"Correction with grade {grade}"
+                if grade is not None:
+                    self.assertEqual(self.client.post("/answers/1/correct", data={
+                        "grade": grade, "comment": comment,
+                    }).status_code, 302)
+                response = self.client.post("/assignments", data={
+                    "exam_id": "81001", "professor_id": "82001", "question_number": "1",
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"This professor is already assigned to this question.", response.data)
+                self.assertNotIn("Location", response.headers)
+                self.assertNotIn("Set-Cookie", response.headers)
+                self.assertNotIn(b"Professor assignment saved successfully.", response.data)
+                self.assertIn(b'value="81001"', response.data)
+                self.assertIn(b'value="82001"', response.data)
+                self.assertIn(b'<option value="1" selected>', response.data)
+                with self.session_factory() as session:
+                    assignments = session.scalars(select(ProfessorAssignment)).all()
+                    self.assertEqual(len(assignments), 1)
+                    self.assertEqual(assignments[0].id, assignment_id)
+                    self.assertEqual(assignments[0].professor_id, 82001)
+                    answer = session.get(QuestionCorrection, 1)
+                    self.assertEqual(answer.evaluated, grade is not None)
+                    self.assertEqual(answer.grade, None if grade is None else float(grade))
+                    self.assertEqual(answer.comment, comment)
+
+    def test_professor_can_be_changed_before_any_answer_is_corrected(self):
+        self.assertEqual(self.upload_pdf(self.make_pdf(8)).status_code, 302)
+        self.assign_professor(professor_id=82001)
+        self.assign_professor(professor_id=82005)
+        self.assign_professor(question_number=2, professor_id=82001)
+        with self.session_factory() as session:
+            assignment = session.scalar(select(ProfessorAssignment).where(
+                ProfessorAssignment.exam_id == 81001,
+                ProfessorAssignment.question_number == 1,
+            ))
+            self.assertEqual(assignment.professor_id, 82005)
+        self.assertIn(b"Professor: 82005.", self.client.get("/answers/1/correct").data)
+        self.assertIn(b"Professor: 82005.", self.client.get("/answers/5/correct").data)
+
+    def test_corrected_answer_locks_professor_for_the_entire_exam_question(self):
+        self.assertEqual(self.upload_pdf(self.make_pdf(8)).status_code, 302)
+        self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
+        for question_number, grade in ((1, "0"), (2, "10")):
+            with self.subTest(question_number=question_number, grade=grade):
+                self.assign_professor(question_number=question_number)
+                answer_id = question_number + 8
+                self.assertEqual(self.client.post(f"/answers/{answer_id}/correct", data={
+                    "grade": grade, "comment": "Original professor correction",
+                }).status_code, 302)
+                response = self.client.post("/assignments", data={
+                    "exam_id": "81001", "question_number": str(question_number),
+                    "professor_id": str(82010 + question_number),
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"The professor cannot be changed because this exam question already has corrected answers.", response.data)
+                self.assertNotIn("Location", response.headers)
+                self.assertNotIn("Set-Cookie", response.headers)
+                with self.session_factory() as session:
+                    assignment = session.scalar(select(ProfessorAssignment).where(
+                        ProfessorAssignment.exam_id == 81001,
+                        ProfessorAssignment.question_number == question_number,
+                    ))
+                    self.assertEqual(assignment.professor_id, 82000 + question_number)
+                    answer = session.get(QuestionCorrection, answer_id)
+                    self.assertEqual(answer.grade, float(grade))
+                    self.assertEqual(answer.comment, "Original professor correction")
+                    self.assertTrue(answer.evaluated)
+                    self.assertFalse(session.get(QuestionCorrection, question_number).evaluated)
+        self.assign_professor(question_number=3)
+        self.assign_professor(question_number=3, professor_id=82013)
+        self.assign_professor(question_number=1, exam_id=81002, professor_id=82001)
+
+    def test_database_rejects_duplicate_professor_assignments(self):
+        self.assign_professor()
+        with self.assertRaises(IntegrityError):
+            with self.session_factory.begin() as session:
+                session.add(ProfessorAssignment(exam_id=81001, question_number=2, professor_id=82001))
+        self.assign_professor(question_number=2, professor_id=82002)
+
+    def test_grading_and_professor_reassignment_cannot_bypass_each_other(self):
+        self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
+        self.assign_professor()
+        grading_started = Event()
+        reassignment_started = Event()
+        finish_grading = Event()
+        isfinite = correction_service.math.isfinite
+
+        def pause_grading(value):
+            grading_started.set()
+            if not finish_grading.wait(5):
+                raise RuntimeError("Timed out waiting to finish grading")
+            return isfinite(value)
+
+        def observe_reassignment(connection, cursor, statement, parameters, context, executemany):
+            if current_thread().name.startswith("assignment-race") and statement == "BEGIN IMMEDIATE":
+                reassignment_started.set()
+
+        def save_grade():
+            with self.app.test_client() as client:
+                return client.post("/answers/1/correct", data={"grade": "10"})
+
+        def reassign_professor():
+            with self.app.test_client() as client:
+                return client.post("/assignments", data={
+                    "exam_id": "81001", "question_number": "1", "professor_id": "82002",
+                })
+
+        engine = self.app.extensions["correction_engine"]
+        event.listen(engine, "before_cursor_execute", observe_reassignment)
+        try:
+            with patch.object(correction_service.math, "isfinite", side_effect=pause_grading):
+                with ThreadPoolExecutor(max_workers=2, thread_name_prefix="assignment-race") as executor:
+                    grading = executor.submit(save_grade)
+                    try:
+                        self.assertTrue(grading_started.wait(5))
+                        # Ignore the BEGIN issued by the grading request itself.
+                        reassignment_started.clear()
+                        reassignment = executor.submit(reassign_professor)
+                        self.assertTrue(reassignment_started.wait(5))
+                        self.assertFalse(reassignment.done())
+                    finally:
+                        finish_grading.set()
+                    self.assertEqual(grading.result(timeout=5).status_code, 302)
+                    response = reassignment.result(timeout=5)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertIn(b"The professor cannot be changed because this exam question already has corrected answers.", response.data)
+        finally:
+            event.remove(engine, "before_cursor_execute", observe_reassignment)
+        with self.session_factory() as session:
+            self.assertEqual(session.scalar(select(ProfessorAssignment)).professor_id, 82001)
+            self.assertEqual(session.get(QuestionCorrection, 1).grade, 10)
+
+    def test_legacy_database_is_validated_without_rewriting_its_assignments(self):
+        database_path = Path(self.temp_dir.name) / "legacy.sqlite"
+        with closing(sqlite3.connect(database_path)) as connection:
+            connection.execute("""
+                CREATE TABLE professor_assignment (
+                    id INTEGER PRIMARY KEY, professor_id INTEGER NOT NULL,
+                    exam_id INTEGER NOT NULL, question_number INTEGER NOT NULL,
+                    UNIQUE (exam_id, question_number)
+                )
+            """)
+            connection.executemany(
+                "INSERT INTO professor_assignment (professor_id, exam_id, question_number) VALUES (?, ?, ?)",
+                [(82001, 81001, 1), (82001, 81001, 2)],
+            )
+            connection.commit()
+        legacy_app = correction_service.create_app(f"sqlite:///{database_path.as_posix()}")
+        legacy_app.testing = True
+        try:
+            client = legacy_app.test_client()
+            factory = legacy_app.extensions["correction_session_factory"]
+            self.assertEqual(client.get("/assignments").status_code, 200)
+            with factory() as session:
+                self.assertEqual([row.professor_id for row in session.scalars(
+                    select(ProfessorAssignment).order_by(ProfessorAssignment.id)
+                )], [82001, 82001])
+            response = client.post("/assignments", data={
+                "exam_id": "81001", "professor_id": "82001", "question_number": "3",
+            })
+            self.assertIn(b"This professor is already assigned to another question in this exam.", response.data)
+            self.assertEqual(client.post("/assignments", data={
+                "exam_id": "81001", "professor_id": "82002", "question_number": "2",
+            }).status_code, 302)
+            self.assertEqual(client.post("/scans/upload", data={
+                "exam_id": "81001", "file": (io.BytesIO(self.make_pdf(4)), "scan.pdf"),
+            }).status_code, 302)
+            self.assertEqual(client.post("/answers/1/correct", data={"grade": "0"}).status_code, 302)
+            response = client.post("/assignments", data={
+                "exam_id": "81001", "professor_id": "82003", "question_number": "1",
+            })
+            self.assertIn(b"The professor cannot be changed because this exam question already has corrected answers.", response.data)
+        finally:
+            legacy_app.extensions["correction_engine"].dispose()
 
     def test_four_page_scan_is_saved_and_pages_are_available(self):
         response = self.upload_pdf(self.make_pdf(4))

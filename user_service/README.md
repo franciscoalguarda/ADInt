@@ -60,6 +60,10 @@ Os papéis disponíveis são:
 No formulário de criação, seleciona um ou mais papéis através das checkboxes.
 Os nomes dos papéis no CSV têm de corresponder exatamente aos valores acima.
 Papéis repetidos para o mesmo utilizador são considerados apenas uma vez.
+Antes de guardar, a aplicação confirma que todos os papéis selecionados existem
+na base de dados. Se algum estiver em falta, apresenta uma mensagem
+e não cria o utilizador nem guarda parcialmente os seus papéis. 
+No CSV, a mesma situação anula toda a importação.
 
 ## Importação CSV
 
@@ -115,6 +119,8 @@ As tabelas inexistentes e os papéis predefinidos são criados no arranque:
 
 A relação entre utilizadores e papéis é de muitos para muitos, permitindo que
 um utilizador tenha vários papéis e que um papel pertença a vários utilizadores.
+As chaves estrangeiras são ativadas em cada ligação SQLite, impedindo associações
+a utilizadores ou papéis inexistentes e a remoção direta de registos referenciados.
 
 ## Testes
 
@@ -126,6 +132,8 @@ Os testes de criação e importação usam uma base de dados temporária.
 Também são verificadas as contagens da página inicial, incluindo utilizadores
 com vários papéis, a preservação dos campos após erros e os redirecionamentos
 de sucesso.
+São ainda verificadas as chaves estrangeiras e a rejeição de papéis em falta
+na base de dados, incluindo o rollback de toda a importação CSV.
 
 ## Estrutura
 

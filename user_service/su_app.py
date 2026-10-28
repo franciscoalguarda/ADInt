@@ -2,7 +2,7 @@ import csv
 import io
 
 from flask import Flask, redirect, render_template, request, url_for
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlalchemy.exc import IntegrityError
 from os import path
@@ -19,6 +19,11 @@ if path.exists(DATABASE_FILE):
     print("\t database already exists")
 
 engine = create_engine('sqlite:///%s'%(DATABASE_FILE), echo=False)
+
+@event.listens_for(engine, "connect")
+def enable_foreign_keys(connection, _):
+    connection.execute("PRAGMA foreign_keys=ON")
+
 
 Base.metadata.create_all(engine)
 
@@ -125,11 +130,15 @@ def create_user(user_data, session):
         raise ValueError("duplicate_id")
 
     role_query = select(Role).where(Role.name.in_(role_names))
+    roles = session.scalars(role_query).all()
+    if len(roles) != len(role_names):
+        raise ValueError("unavailable_role")
+
     user = User(
         id=user_id,
         name=name,
         password=generate_password_hash(password),
-        roles=session.scalars(role_query).all(),
+        roles=roles,
     )
     session.add(user)
     return user
@@ -206,6 +215,7 @@ def get_error_message(reason):
     messages = {
         "duplicate_id": "User identifier already exists.",
         "invalid_role": "Invalid user role.",
+        "unavailable_role": "One or more selected roles are unavailable. Please try again later.",
         "invalid_csv": "Invalid CSV file.",
         "invalid_id": "Invalid user identifier.",
         "invalid_id_range": "Identifier must be a positive 64-bit integer.",

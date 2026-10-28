@@ -11,6 +11,7 @@ class ProfessorAssignment(Base):
     __tablename__ = "professor_assignment"
     __table_args__ = (
         UniqueConstraint("exam_id", "question_number"),
+        UniqueConstraint("exam_id", "professor_id", name="uq_assignment_exam_professor"),
         CheckConstraint("question_number BETWEEN 1 AND 4"),
         CheckConstraint("exam_id > 0 AND professor_id > 0"),
     )

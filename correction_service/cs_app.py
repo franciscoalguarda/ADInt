@@ -164,6 +164,12 @@ def get_record_or_404(session, model, identifier):
     return record
 
 
+def begin_sqlite_write(session):
+    # Serialize assignment changes and grading so their checks remain valid until commit.
+    if session.bind.dialect.name == "sqlite":
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
 def get_error_message(reason):
     messages = {
         "invalid_exam_id": "Exam identifier must be a positive 64-bit integer.",
@@ -171,6 +177,9 @@ def get_error_message(reason):
         "invalid_question_number": "Question number must be a positive 64-bit integer.",
         "invalid_question_range": "Question number must be between 1 and 4.",
         "assignment_changed": "This question assignment changed. Please try again.",
+        "same_assignment": "This professor is already assigned to this question.",
+        "professor_already_assigned": "This professor is already assigned to another question in this exam.",
+        "assignment_locked": "The professor cannot be changed because this exam question already has corrected answers.",
         "missing_assignment": "Assign a professor to this exam question before correcting the answer.",
         "missing_pdf": "Please select a PDF file.",
         "invalid_pdf_extension": "Only PDF files are accepted.",
@@ -243,10 +252,30 @@ def create_app(database_url=None):
                 if question not in range(1, 5):
                     raise ValueError("invalid_question_range")
                 with Session.begin() as session:
+                    begin_sqlite_write(session)
                     assignment = session.scalar(select(ProfessorAssignment).where(
                         ProfessorAssignment.exam_id == exam_id,
                         ProfessorAssignment.question_number == question,
                     ))
+                    if assignment is not None and assignment.professor_id == professor_id:
+                        raise ValueError("same_assignment")
+                    corrected_answer = session.scalar(select(QuestionCorrection.id).join(
+                        ExamCorrectionPdf,
+                        QuestionCorrection.exam_correction_pdf_id == ExamCorrectionPdf.id,
+                    ).where(
+                        ExamCorrectionPdf.exam_id == exam_id,
+                        QuestionCorrection.question_number == question,
+                        QuestionCorrection.evaluated.is_(True),
+                    ).limit(1))
+                    if corrected_answer is not None:
+                        raise ValueError("assignment_locked")
+                    other_assignment = session.scalar(select(ProfessorAssignment.id).where(
+                        ProfessorAssignment.exam_id == exam_id,
+                        ProfessorAssignment.professor_id == professor_id,
+                        ProfessorAssignment.question_number != question,
+                    ).limit(1))
+                    if other_assignment is not None:
+                        raise ValueError("professor_already_assigned")
                     if assignment is None:
                         session.add(ProfessorAssignment(
                             exam_id=exam_id, question_number=question, professor_id=professor_id
@@ -356,6 +385,8 @@ def create_app(database_url=None):
     def correct_answer(answer_id):
         error_message = None
         with Session.begin() as session:
+            if request.method == "POST":
+                begin_sqlite_write(session)
             answer = get_record_or_404(session, QuestionCorrection, answer_id)
             source = session.get(ExamCorrectionPdf, answer.exam_correction_pdf_id)
             assignment = session.scalar(select(ProfessorAssignment).where(

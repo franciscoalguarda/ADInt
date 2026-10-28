@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
@@ -18,6 +19,7 @@ class UserServiceTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "users.sqlite"
         self.engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+        event.listen(self.engine, "connect", user_service.enable_foreign_keys)
         user_service.Base.metadata.create_all(self.engine)
         self.session_factory = sessionmaker(bind=self.engine)
         self.original_session = user_service.Session
@@ -43,6 +45,92 @@ class UserServiceTests(unittest.TestCase):
                 self.assertNotIn(b'class="message error"', response.data)
                 self.assertNotIn(b'class="message success"', response.data)
                 self.assertNotIn("Set-Cookie", response.headers)
+
+    def test_foreign_keys_are_enabled_on_every_service_connection(self):
+        with user_service.engine.connect() as first, user_service.engine.connect() as second:
+            for connection in (first, second):
+                self.assertEqual(connection.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)
+
+    def test_database_rejects_orphaned_user_role_associations(self):
+        with self.session_factory.begin() as session:
+            user_service.create_user({
+                "id": "77001", "name": "Existing Student", "password": "test-password",
+                "role": "Student",
+            }, session)
+            role_id = session.scalar(select(user_service.Role.id).where(
+                user_service.Role.name == "Student"
+            ))
+        associations = user_service.Base.metadata.tables["user_roles"]
+        statements = (
+            associations.insert().values(user_id=77002, role_id=role_id),
+            associations.insert().values(user_id=77001, role_id=999999),
+            user_service.User.__table__.delete().where(user_service.User.id == 77001),
+            user_service.Role.__table__.delete().where(user_service.Role.id == role_id),
+        )
+        for index, statement in enumerate(statements):
+            with self.subTest(statement=index):
+                with self.assertRaises(IntegrityError):
+                    with self.engine.begin() as connection:
+                        connection.execute(statement)
+        with self.session_factory() as session:
+            user = session.get(user_service.User, 77001)
+            self.assertEqual([role.name for role in user.roles], ["Student"])
+            self.assertEqual(len(session.execute(select(associations)).all()), 1)
+
+    def test_missing_database_role_prevents_user_creation_and_preserves_form(self):
+        with self.session_factory.begin() as session:
+            session.delete(session.scalar(select(user_service.Role).where(
+                user_service.Role.name == "Professor"
+            )))
+        form = {"id": "77003", "name": "Missing Role User", "password": "temporary-password"}
+        for roles in (["Professor"], ["Student", "Professor"]):
+            with self.subTest(roles=roles):
+                response = self.client.post("/users/add", data={**form, "role": roles})
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("Location", response.headers)
+                self.assertNotIn("Set-Cookie", response.headers)
+                self.assertIn(b"One or more selected roles are unavailable. Please try again later.", response.data)
+                self.assertIn(b'value="77003"', response.data)
+                self.assertIn(b'value="Missing Role User"', response.data)
+                self.assertNotIn(b"temporary-password", response.data)
+                for role in roles:
+                    self.assertRegex(response.data, f'value="{role}"\\s+checked'.encode())
+                with self.session_factory() as session:
+                    self.assertIsNone(session.get(user_service.User, 77003))
+                    self.assertEqual(session.execute(select(
+                        user_service.Base.metadata.tables["user_roles"]
+                    )).all(), [])
+        user_service.create_roles()
+        self.assertEqual(self.client.post("/users/add", data={
+            **form, "role": ["Student", "Professor"],
+        }).status_code, 302)
+        with self.session_factory() as session:
+            self.assertEqual({role.name for role in session.get(user_service.User, 77003).roles},
+                             {"Student", "Professor"})
+
+    def test_missing_database_role_rolls_back_the_entire_csv_import(self):
+        with self.session_factory.begin() as session:
+            session.delete(session.scalar(select(user_service.Role).where(
+                user_service.Role.name == "Professor"
+            )))
+            user_service.create_user({
+                "id": "78000", "name": "Existing Student", "password": "existing-password",
+                "role": "Student",
+            }, session)
+        contents = (
+            "id,name,password,role\n"
+            "78001,Valid Student,first-password,Student\n"
+            "78002,Missing Role,second-password,Student|Professor\n"
+        )
+        response = self.client.post("/users/bulk-add", data={
+            "file": (io.BytesIO(contents.encode()), "users.csv"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Location", response.headers)
+        self.assertIn(b"One or more selected roles are unavailable. Please try again later.", response.data)
+        with self.session_factory() as session:
+            self.assertEqual(session.scalars(select(user_service.User.id)).all(), [78000])
+            self.assertEqual([role.name for role in session.get(user_service.User, 78000).roles], ["Student"])
 
     def test_home_counts_users_once_and_includes_each_assigned_role(self):
         empty = self.client.get("/")
