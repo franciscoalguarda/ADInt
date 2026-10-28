@@ -1,8 +1,122 @@
 {% extends 'layout.html' %}
 
-{% block content %}
-  <h2>User management</h2>
-  <p>List registered users, add a user or import multiple users from a CSV file.</p>
-  <p>Each user can have one or more roles: Administrator, Professor, Exam invigilator and Student.</p>
+{% block title %}Overview — User Service{% endblock %}
+{% block body_class %}home-page{% endblock %}
 
+{% block page_styles %}
+  <style>
+    .home-page { background: #f4f7fb; max-width: 1080px; }
+    .home-page header h1 { font-size: 1.25rem; letter-spacing: -.03em; }
+    .dashboard { display: grid; gap: 2rem; padding: .5rem 0 1.5rem; }
+    .dashboard h2, .dashboard h3, .dashboard p, .dashboard dl { margin: 0; }
+    .dashboard-intro { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2rem; }
+    .dashboard-eyebrow { color: #0759a5; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .dashboard-intro h2 { margin: .5rem 0 .65rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; letter-spacing: -.045em; }
+    .dashboard-description { max-width: 36rem; color: #596575; }
+    .dashboard-total { min-width: 10rem; padding: 1.3rem 1.6rem; border-radius: 1rem; background: #123963; color: white; }
+    .dashboard-total dt { color: #d3e3f5; font-size: .85rem; }
+    .dashboard-total dd { margin: .15rem 0 0; font-size: 2.8rem; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .dashboard-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .dashboard-card { display: flex; flex-direction: column; align-items: flex-start; gap: .8rem; padding: 1.5rem; background: white; border: 1px solid #dce4ee; border-radius: 1rem; color: #20242a; text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+    .dashboard-card:hover { border-color: #7ba6d2; box-shadow: 0 6px 20px #173d6510; }
+    .dashboard-card:focus-visible { outline: 3px solid #0759a5; outline-offset: 4px; }
+    .dashboard-icon { display: grid; place-items: center; width: 2.8rem; height: 2.8rem; border-radius: .8rem; background: #eaf2fc; color: #0759a5; }
+    .dashboard-icon svg { width: 1.5rem; height: 1.5rem; }
+    .dashboard-card h3 { font-size: 1.15rem; letter-spacing: -.02em; }
+    .dashboard-card p { color: #596575; font-size: .9rem; }
+    .dashboard-card-action { margin-top: auto; padding-top: .7rem; color: #0759a5; font-size: .9rem; font-weight: 600; }
+    .dashboard-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1rem; }
+    .dashboard-section-heading h3 { font-size: 1.1rem; }
+    .dashboard-section-heading a { font-size: .85rem; }
+    .dashboard-roles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+    .dashboard-role { display: flex; flex-direction: column; justify-content: space-between; gap: .6rem; padding: 1.1rem 1.25rem; background: white; border: 1px solid #dce4ee; border-radius: .8rem; }
+    .dashboard-role dt { font-size: .85rem; color: #596575; }
+    .dashboard-role dd { margin: 0; font-size: 1.8rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .dashboard-note { margin-top: .75rem !important; color: #596575; font-size: .8rem; }
+    .dashboard-help { display: flex; align-items: flex-start; gap: .9rem; padding: 1.25rem; background: #eaf2fc; border: 1px solid #d8e5f6; border-radius: .8rem; }
+    .dashboard-help h3 { font-size: .95rem; margin-bottom: .3rem; }
+    .dashboard-help p { color: #455c76; font-size: .85rem; }
+    .dashboard-help code { overflow-wrap: anywhere; }
+    @media (max-width: 700px) {
+      .dashboard-intro { grid-template-columns: 1fr; gap: 1.25rem; }
+      .dashboard-total { min-width: 0; }
+      .dashboard-actions { grid-template-columns: 1fr; }
+      .dashboard-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .dashboard-card { transition: none; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="dashboard">
+    <section class="dashboard-intro" aria-labelledby="overview-title">
+      <div>
+        <p class="dashboard-eyebrow">National exams · User management</p>
+        <h2 id="overview-title">Manage your users</h2>
+        <p class="dashboard-description">Keep everyone ready for exam day. Browse registered users, add someone new or import a whole group.</p>
+      </div>
+      <dl class="dashboard-total">
+        <dt>Registered users</dt>
+        <dd id="total-users">{{ total_users }}</dd>
+      </dl>
+    </section>
+
+    <section class="dashboard-actions" aria-label="User management actions">
+      <a class="dashboard-card" href="{{ url_for('list_users') }}">
+        <span class="dashboard-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 21v-2a6 6 0 0 0-4-5.65"/>
+          </svg>
+        </span>
+        <h3>List users</h3>
+        <p>Find registered users and check their identifiers and roles.</p>
+        <span class="dashboard-card-action">View users <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="dashboard-card" href="{{ url_for('add_user') }}">
+        <span class="dashboard-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M19 7v6M16 10h6"/>
+          </svg>
+        </span>
+        <h3>Add a user</h3>
+        <p>Register a user and choose one or more roles for them.</p>
+        <span class="dashboard-card-action">Add user <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="dashboard-card" href="{{ url_for('bulk_add_users') }}">
+        <span class="dashboard-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M12 18v-7M9 14l3-3 3 3"/>
+          </svg>
+        </span>
+        <h3>Import a CSV</h3>
+        <p>Add multiple users in one go by uploading a CSV file.</p>
+        <span class="dashboard-card-action">Import users <span aria-hidden="true">→</span></span>
+      </a>
+    </section>
+
+    <section aria-labelledby="roles-title">
+      <div class="dashboard-section-heading">
+        <h3 id="roles-title">Users by role</h3>
+        <a href="{{ url_for('list_users') }}">View all users <span aria-hidden="true">→</span></a>
+      </div>
+      <dl class="dashboard-roles">
+        {% for role, count in role_counts.items() %}
+          <div class="dashboard-role">
+            <dt>{{ role }}</dt>
+            <dd id="role-{{ role | lower | replace(' ', '-') }}-count">{{ count }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+      <p class="dashboard-note">A user can have more than one role, so role counts may exceed the total number of users.</p>
+    </section>
+
+    <aside class="dashboard-help" aria-labelledby="csv-help-title">
+      <div>
+        <h3 id="csv-help-title">Preparing a CSV import?</h3>
+        <p>Use a UTF-8 file with the columns <code>id, name, password, role</code>. Separate multiple roles with <code>|</code>, for example <code>Professor|Exam invigilator</code>.</p>
+      </div>
+    </aside>
+  </div>
 {% endblock %}

@@ -32,7 +32,8 @@ Configuration:
 - `/exams/<exam_id>/enroll`: bulk-enroll students from a UTF-8 CSV.
 - `/enrollments`: list enrollment details (exam, date, course, and student ID).
 
-The CSV must contain a `student_id` column, with one positive integer per row.
+The CSV must contain a `student_id` column, with one positive 64-bit integer per
+row (at most `9223372036854775807`).
 `student_identifier` is accepted as an alternative header. An upload is atomic:
 invalid IDs, repeated IDs, or students already enrolled cause the entire upload
 to be rejected. Because user records live in a separate service/database, this
@@ -41,8 +42,12 @@ service stores the supplied student IDs but cannot verify that those users exist
 ## Printing Service XML-RPC contract
 
 The Admin Service calls the XML-RPC method `print_exam` with four positional
-arguments: `exam_id` (integer), `exam_date` (ISO `YYYY-MM-DD` string), `course`
-(string), and `student_ids` (list of integers). The Printing Service implements this contract at `http://127.0.0.1:5003` by
+arguments: `exam_id` (decimal string), `exam_date` (ISO `YYYY-MM-DD` string),
+`course` (string), and `student_ids` (list of decimal strings). Identifiers are
+stored as integers in SQLite; decimal strings are used only in the XML-RPC
+request to preserve 64-bit values beyond the protocol's 32-bit integer limit.
+The Printing Service also accepts integer arguments from existing clients.
+The Printing Service implements this contract at `http://127.0.0.1:5003` by
 default. Configure its endpoint with `ADMIN_PRINTING_RPC_URL` if needed. A
 failed RPC is reported to the administrator; it is not recorded as a successful
 order.

@@ -10,7 +10,7 @@ Na raiz do repositório, criar o ambiente virtual e instalar as dependências:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install Flask SQLAlchemy Werkzeug
+.\.venv\Scripts\python.exe -m pip install -r user_service\requirements.txt
 .\.venv\Scripts\python.exe -m pip install -r admin_service\requirements.txt
 .\.venv\Scripts\python.exe -m pip install -r printing_service\requirements.txt
 .\.venv\Scripts\python.exe -m pip install -r correction_service\requirements.txt
@@ -48,6 +48,7 @@ Professor, Exam invigilator e Student; as passwords são guardadas como hashes.
 | --- | --- | --- |
 | `/` | GET | Página inicial e navegação. |
 | `/list_users` | GET | SU_1: listar utilizadores e papéis. |
+| `/list_users/sucess` | GET | Listar utilizadores com confirmação de adição ou importação. |
 | `/users/add` | GET, POST | SU_2: adicionar um utilizador. |
 | `/users/bulk-add` | GET, POST | SU_3: importação atómica de utilizadores por CSV. |
 
@@ -77,6 +78,8 @@ Modelos SQLAlchemy em `admin_service/admin_data.py`: `Exam` e `Enrollment`.
 ### Printing Service
 
 Recebe `print_exam(exam_id, exam_date, course, student_ids)` por XML-RPC e
+transporta os identificadores como texto decimal para suportar inteiros de
+64 bits, mantendo-os como inteiros na base de dados. O serviço
 gera um único PDF com exatamente quatro páginas por aluno. Cada folha tem um
 identificador único em QR code, igual nas suas quatro páginas. A página web
 lista os exames impressos e disponibiliza os PDFs.
@@ -125,6 +128,30 @@ Os testes usam bases de dados e diretórios temporários:
 .\.venv\Scripts\python.exe -m unittest discover -s printing_service -p "test*.py" -v
 .\.venv\Scripts\python.exe -m unittest discover -s correction_service -p "test*.py" -v
 ```
+
+## Limpar bases de dados e caches
+
+Parar os quatro serviços e executar, na raiz do projeto:
+
+```powershell
+python clean.py
+```
+
+O script elimina os ficheiros `.sqlite`, os seus ficheiros auxiliares
+(`-wal`, `-shm` e `-journal`) e as pastas `__pycache__` dos quatro serviços.
+Os dados guardados nas bases de dados são apagados. As bases de dados são
+recriadas no próximo arranque dos serviços e as caches quando necessárias.
+O ambiente virtual, o código, o template PDF e os PDFs em `printing_service/output`
+são preservados.
+
+Para ver os caminhos que seriam eliminados, sem apagar ficheiros:
+
+```powershell
+python clean.py --dry-run
+```
+
+O script usa a sua própria localização para encontrar os serviços, pelo que
+também pode ser invocado a partir de outra pasta através do caminho completo.
 
 ## Âmbito da Parte 1
 

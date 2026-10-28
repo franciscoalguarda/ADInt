@@ -28,6 +28,22 @@ DEFAULT_DATABASE_PATH = Path(__file__).resolve().with_name("printing.sqlite")
 DEFAULT_TEMPLATE_PATH = Path(__file__).resolve().with_name("Exam-template.pdf")
 
 
+def parse_identifier(value, label):
+    message = f"{label} must be a positive 64-bit integer."
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        try:
+            value = int(value)
+        except ValueError as error:
+            raise Fault(1, message) from error
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not 0 < value <= MAX_IDENTIFIER
+    ):
+        raise Fault(1, message)
+    return value
+
+
 def create_database_engine(database_url):
     engine = create_engine(
         database_url,
@@ -87,12 +103,7 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
     template_path = Path(template_path)
 
     def print_exam(exam_id, exam_date, course, student_ids):
-        if (
-            not isinstance(exam_id, int)
-            or isinstance(exam_id, bool)
-            or not 0 < exam_id <= MAX_IDENTIFIER
-        ):
-            raise Fault(1, "exam_id must be a positive 64-bit integer.")
+        exam_id = parse_identifier(exam_id, "exam_id")
 
         if not isinstance(exam_date, str):
             raise Fault(1, "exam_date must use the YYYY-MM-DD format.")
@@ -109,13 +120,10 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
 
         if not isinstance(student_ids, list) or not student_ids:
             raise Fault(1, "student_ids must contain at least one student.")
-        if any(
-            not isinstance(student_id, int)
-            or isinstance(student_id, bool)
-            or not 0 < student_id <= MAX_IDENTIFIER
+        student_ids = [
+            parse_identifier(student_id, "Each student ID")
             for student_id in student_ids
-        ):
-            raise Fault(1, "Each student ID must be a positive 64-bit integer.")
+        ]
         if len(student_ids) != len(set(student_ids)):
             raise Fault(1, "student_ids must not contain duplicates.")
 

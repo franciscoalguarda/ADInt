@@ -22,6 +22,12 @@ for compatibility. The original PyPI `Flask-XML-RPC` package is Python 2-only,
 so this compatible reloaded fork is used instead. The Admin Service can use its
 default `ADMIN_PRINTING_RPC_URL` without changes.
 
+The `exam_id` and `student_ids` arguments accept decimal strings or integers.
+The Admin Service sends decimal strings so identifiers up to
+`9223372036854775807` can cross XML-RPC without its 32-bit integer restriction.
+The Printing Service validates and converts them to integers before storing
+them in SQLite. Invalid, out-of-range or duplicate identifiers are rejected.
+
 The PDF template is `printing_service\Exam-template.pdf`. Its first page
 contains instructions and is omitted; the four question pages are copied for
 each student. The generated PDF therefore contains exactly

@@ -134,6 +134,38 @@ class PrintingServiceTests(unittest.TestCase):
         with self.assertRaises(Fault):
             self.proxy.print_exam(12, "2026-02-30", "Algorithms", [10])
 
+    def test_decimal_strings_support_64bit_exam_and_student_identifiers(self):
+        exam_id = 2**63 - 1
+        student_ids = [2**31, 2**63 - 1]
+        self.proxy.print_exam(
+            str(exam_id), "2026-11-01", "Algorithms",
+            [str(student_id) for student_id in student_ids],
+        )
+        with self.app.extensions["printing_session_factory"]() as session:
+            exam = session.get(PrintedExam, exam_id)
+            self.assertIsNotNone(exam)
+            self.assertEqual([sheet.student_id for sheet in exam.sheets], student_ids)
+            with pymupdf.open(stream=exam.pdf_file, filetype="pdf") as document:
+                self.assertEqual(document.page_count, 8)
+        self.assertEqual(self.client.get(f"/exams/{exam_id}/pdf").status_code, 200)
+
+    def test_invalid_identifier_values_are_rejected(self):
+        for identifier in ("0", "-1", "1.5", "abc", str(2**63), True, 1.5):
+            with self.subTest(identifier=identifier, field="exam_id"):
+                with self.assertRaises(Fault):
+                    self.proxy.print_exam(identifier, "2026-11-01", "Algorithms", [10])
+            with self.subTest(identifier=identifier, field="student_id"):
+                with self.assertRaises(Fault):
+                    self.proxy.print_exam(12, "2026-11-01", "Algorithms", [identifier])
+        with self.app.extensions["printing_session_factory"]() as session:
+            self.assertIsNone(session.scalar(select(PrintedExam.id)))
+
+    def test_duplicate_ids_are_detected_after_normalizing_wire_types(self):
+        with self.assertRaises(Fault):
+            self.proxy.print_exam("12", "2026-11-01", "Algorithms", [10, "010"])
+        with self.app.extensions["printing_session_factory"]() as session:
+            self.assertIsNone(session.get(PrintedExam, 12))
+
     def test_duplicate_student_ids_are_rejected_without_creating_exam(self):
         with self.assertRaises(Fault):
             self.proxy.print_exam(12, "2026-11-01", "Algorithms", [10, 10])

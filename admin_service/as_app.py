@@ -13,6 +13,9 @@ from sqlalchemy.orm import sessionmaker
 from admin_data import Base, Enrollment, Exam
 
 
+MAX_IDENTIFIER = 2**63 - 1
+
+
 def create_app(database_url=None, printing_rpc_url=None):
     """Configure the Flask app, its database, and the Admin Service routes."""
     app = Flask(__name__)
@@ -151,9 +154,9 @@ def create_app(database_url=None, printing_rpc_url=None):
                         raise ValueError(
                             f"Invalid student identifier on CSV line {line_number}."
                         ) from error
-                    if student_id <= 0:
+                    if not 0 < student_id <= MAX_IDENTIFIER:
                         raise ValueError(
-                            f"Student identifiers must be positive "
+                            f"Student identifiers must be positive 64-bit integers "
                             f"(CSV line {line_number})."
                         )
                     student_ids.append(student_id)
@@ -241,8 +244,10 @@ def create_app(database_url=None, printing_rpc_url=None):
         try:
             with ServerProxy(current_app.config["PRINTING_RPC_URL"]) as printing:
                 # Keep this argument order aligned with the Printing Service contract.
+                # Decimal strings preserve 64-bit IDs beyond XML-RPC's int32 limit.
                 result = printing.print_exam(
-                    exam_data[0], exam_data[1], exam_data[2], student_ids
+                    str(exam_data[0]), exam_data[1], exam_data[2],
+                    [str(student_id) for student_id in student_ids],
                 )
         except (Fault, OSError, ProtocolError) as error:
             flash(f"Could not contact the Printing Service: {error}", "error")

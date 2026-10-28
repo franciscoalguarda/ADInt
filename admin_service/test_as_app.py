@@ -1,8 +1,10 @@
 import io
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from xmlrpc.client import dumps
 
 from sqlalchemy import select
 
@@ -141,8 +143,54 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Queued", response.data)
         server_proxy.assert_called_once_with("http://printing.test:5003")
         proxy.__enter__.return_value.print_exam.assert_called_once_with(
-            exam_id, "2026-11-01", "Algorithms", [10, 20]
+            str(exam_id), "2026-11-01", "Algorithms", ["10", "20"]
         )
+
+    def test_printing_order_supports_64bit_identifiers(self):
+        """Large exam and student IDs can be serialized by the real XML-RPC encoder."""
+        exam_id = 2**63 - 1
+        student_ids = [2**31, 2**63 - 1]
+        session_factory = self.app.extensions["admin_session_factory"]
+        with session_factory.begin() as session:
+            session.add(Exam(
+                id=exam_id, date=date(2026, 11, 1), course="Algorithms"
+            ))
+            session.flush()
+            session.add_all(
+                Enrollment(exam_id=exam_id, student_id=student_id)
+                for student_id in student_ids
+            )
+
+        def serialize_request(*args):
+            dumps(args, methodname="print_exam")
+            return "Queued"
+
+        proxy = MagicMock()
+        proxy.__enter__.return_value.print_exam.side_effect = serialize_request
+        with patch("as_app.ServerProxy", return_value=proxy):
+            response = self.client.post(
+                f"/exams/{exam_id}/order-printing", follow_redirects=True
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Queued", response.data)
+        proxy.__enter__.return_value.print_exam.assert_called_once_with(
+            str(exam_id), "2026-11-01", "Algorithms",
+            [str(student_id) for student_id in student_ids],
+        )
+
+    def test_enrollment_rejects_ids_outside_sqlite_range_atomically(self):
+        exam_id = self.schedule_exam()
+        contents = f"student_id\n10\n{2**63}\n".encode()
+        response = self.client.post(
+            f"/exams/{exam_id}/enroll",
+            data={"file": (io.BytesIO(contents), "students.csv")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"positive 64-bit integers", response.data)
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
     def test_printing_failure_is_reported(self):
         """A network failure from the Printing Service is shown to the administrator."""

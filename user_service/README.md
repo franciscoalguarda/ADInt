@@ -24,7 +24,7 @@ python -m venv venv
 Instala as dependências e inicia o serviço:
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install Flask SQLAlchemy
+.\venv\Scripts\python.exe -m pip install -r user_service\requirements.txt
 .\venv\Scripts\python.exe user_service\su_app.py
 ```
 
@@ -35,13 +35,11 @@ O serviço é iniciado em modo de desenvolvimento, com `debug=True`.
 
 | Caminho | Métodos | Funcionalidade |
 | --- | --- | --- |
-| `/` | GET | Página inicial e navegação. |
+| `/` | GET | Página inicial com cartões de ação, total de utilizadores e contagens por papel. |
 | `/list_users` | GET | SU_1: listar identificadores, nomes e papéis, por ordem de identificador. |
+| `/list_users/sucess` | GET | Listar utilizadores com a confirmação de adição ou importação. |
 | `/users/add` | GET, POST | SU_2: apresentar o formulário e adicionar um utilizador. |
 | `/users/bulk-add` | GET, POST | SU_3: apresentar o formulário e importar um CSV. |
-
-As mensagens de sucesso ou erro são apresentadas nas páginas através de
-`flash()` e do template `layout.html`.
 
 ## Dados dos utilizadores
 
@@ -118,22 +116,25 @@ As tabelas inexistentes e os papéis predefinidos são criados no arranque:
 A relação entre utilizadores e papéis é de muitos para muitos, permitindo que
 um utilizador tenha vários papéis e que um papel pertença a vários utilizadores.
 
-## Configuração
-
-A variável de ambiente `USER_SECRET_KEY` permite definir a chave das sessões
-Flask, utilizadas pelas mensagens `flash()`. Se não for definida, a aplicação
-gera uma chave aleatória em cada arranque.
-
-Para a definir em PowerShell, antes de iniciar o serviço:
+## Testes
 
 ```powershell
-$env:USER_SECRET_KEY = "chave-local-para-desenvolvimento"
+.\venv\Scripts\python.exe -m unittest discover -s user_service -v
 ```
+
+Os testes de criação e importação usam uma base de dados temporária.
+Também são verificadas as contagens da página inicial, incluindo utilizadores
+com vários papéis, a preservação dos campos após erros e os redirecionamentos
+de sucesso.
 
 ## Estrutura
 
 - [su_app.py](su_app.py): configuração da aplicação, consultas, validação,
-  criação de utilizadores, importação CSV e rotas.
+  criação de utilizadores, importação CSV, contagens do resumo e rotas.
 - [user_data.py](user_data.py): modelos SQLAlchemy `User` e `Role` e a tabela
   de associação `UserRoles`.
 - [templates/](templates/): páginas HTML e estrutura comum da aplicação.
+- [requirements.txt](requirements.txt): dependências Python do serviço.
+- [test_su_app.py](test_su_app.py): testes automatizados do serviço.
+- [test_users.csv](test_users.csv): exemplo de importação com cinco utilizadores,
+  incluindo um utilizador com vários papéis.
