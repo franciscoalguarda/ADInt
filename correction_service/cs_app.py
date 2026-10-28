@@ -3,19 +3,100 @@ import os
 from io import BytesIO
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pymupdf
-from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, redirect, render_template, request, send_file, url_for
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.utils import secure_filename
 
 if __package__:
-    from . import process_student_answers
     from .correction_data import Base, ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
 else:
-    import process_student_answers
     from correction_data import Base, ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
+
+
+def split_pdf_into_pages(document: pymupdf.Document) -> list[pymupdf.Document]:
+	"""Create an independent one-page PDF document for every source page.
+
+	Args:
+		document: PDF document whose pages should be separated.
+
+	Returns:
+		A list of open PDF documents, each containing one copied page. The
+		caller is responsible for closing every returned document.
+	"""
+	page_documents = []
+
+	for page_number in range(document.page_count):
+		page_document = pymupdf.open()
+		page_document.insert_pdf(document, from_page=page_number, to_page=page_number)
+		page_documents.append(page_document)
+
+	return page_documents
+
+
+def cover_qr_codes_with_gray_squares(page_documents: list[pymupdf.Document]) -> None:
+	"""Overlay a gray square on each QR code detected in the pages.
+
+	Args:
+		page_documents: One-page PDF documents to scan and modify.
+
+	Returns:
+		None. The supplied page documents are modified in place.
+
+	The square is slightly larger than the detected QR code and is drawn
+	directly onto each page. Documents with no detected QR codes are unchanged.
+	"""
+	# Use OpenCV's QR code detector to find QR codes in the pages.
+	detector = cv2.QRCodeDetector()
+	gray = (0.5, 0.5, 0.5)
+
+	for page_document in page_documents:
+		page = page_document[0]
+		# Get a high-resolution pixmap of the page to detect QR codes accurately.
+		pixmap = page.get_pixmap(
+			matrix=pymupdf.Matrix(2, 2),
+			colorspace=pymupdf.csRGB,
+			alpha=False,
+		)
+		# Convert the pixmap to a NumPy array and then to grayscale for QR detection.
+		image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+			pixmap.height,
+			pixmap.width,
+			3,
+		)
+		# Convert the RGB image to grayscale for QR code detection.
+		grayscale = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+		# Detect QR codes and get their corner points.
+		_, _, points, _ = detector.detectAndDecodeMulti(grayscale)
+		if points is None:
+			continue
+
+		# Calculate the scaling factors to map pixmap coordinates back to page coordinates.
+		scale_x = pixmap.width / page.rect.width
+		scale_y = pixmap.height / page.rect.height
+		# For each detected QR code, calculate its bounding box and draw a gray square over it.
+		for qr_points in points:
+			qr_points = qr_points.reshape(-1, 2)
+			left, right = qr_points[:, 0].min(), qr_points[:, 0].max()
+			top, bottom = qr_points[:, 1].min(), qr_points[:, 1].max()
+			side = max(right - left, bottom - top) * 1.1
+			center_x = (left + right) / 2
+			center_y = (top + bottom) / 2
+			page.draw_rect(
+				pymupdf.Rect(
+					page.rect.x0 + (center_x - side / 2) / scale_x,
+					page.rect.y0 + (center_y - side / 2) / scale_y,
+					page.rect.x0 + (center_x + side / 2) / scale_x,
+					page.rect.y0 + (center_y + side / 2) / scale_y,
+				),
+				color=None,
+				fill=gray,
+				overlay=True,
+			)
 
 
 def process_pdf(contents):
@@ -23,27 +104,28 @@ def process_pdf(contents):
     try:
         document = pymupdf.open(stream=contents, filetype="pdf")
     except (RuntimeError, ValueError) as error:
-        raise ValueError("The uploaded file is not a readable PDF.") from error
+        raise ValueError("unreadable_pdf") from error
 
     pages = []
     with document:
         if document.needs_pass:
-            raise ValueError("Password-protected PDFs are not supported.")
+            raise ValueError("protected_pdf")
         if not document.page_count:
-            raise ValueError("The PDF contains no pages.")
+            raise ValueError("empty_pdf")
         # The supplied five-page PDFs begin with a page that is not an answer.
         # Accept either complete four-question sheets or one introductory page
         # followed by complete sheets. Only this in-memory copy is changed.
         if document.page_count > 1 and document.page_count % 4 == 1:
             document.delete_page(0)
         if document.page_count % 4:
-            raise ValueError(
-                "The PDF must contain four answer pages per sheet, "
-                "optionally preceded by one introductory page."
-            )
-        page_documents = process_student_answers.split_pdf_into_pages(document)
+            raise ValueError("invalid_page_count")
+        # Align drawing coordinates with the rendered page without changing its appearance.
+        for page in document:
+            if page.rotation:
+                page.remove_rotation()
+        page_documents = split_pdf_into_pages(document)
         try:
-            process_student_answers.cover_qr_codes_with_gray_squares(page_documents)
+            cover_qr_codes_with_gray_squares(page_documents)
             for page_document in page_documents:
                 page = page_document[0]
                 pixmap = page.get_pixmap(
@@ -63,21 +145,53 @@ def process_pdf(contents):
     return pages
 
 
-def positive_identifier(value, label):
+def positive_identifier(value, reason):
     try:
         identifier = int(str(value).strip())
     except (TypeError, ValueError) as error:
-        raise ValueError(f"{label} must be a positive 64-bit integer.") from error
+        raise ValueError(reason) from error
     if not 0 < identifier <= 2**63 - 1:
-        raise ValueError(f"{label} must be a positive 64-bit integer.")
+        raise ValueError(reason)
     return identifier
+
+
+def get_record_or_404(session, model, identifier):
+    if not 0 < identifier <= 2**63 - 1:
+        abort(404)
+    record = session.get(model, identifier)
+    if record is None:
+        abort(404)
+    return record
+
+
+def get_error_message(reason):
+    messages = {
+        "invalid_exam_id": "Exam identifier must be a positive 64-bit integer.",
+        "invalid_professor_id": "Professor identifier must be a positive 64-bit integer.",
+        "invalid_question_number": "Question number must be a positive 64-bit integer.",
+        "invalid_question_range": "Question number must be between 1 and 4.",
+        "assignment_changed": "This question assignment changed. Please try again.",
+        "missing_assignment": "Assign a professor to this exam question before correcting the answer.",
+        "missing_pdf": "Please select a PDF file.",
+        "invalid_pdf_extension": "Only PDF files are accepted.",
+        "empty_upload": "The uploaded PDF is empty.",
+        "unreadable_pdf": "The uploaded file is not a readable PDF.",
+        "protected_pdf": "Password-protected PDFs are not supported.",
+        "empty_pdf": "The PDF contains no pages.",
+        "invalid_page_count": (
+            "The PDF must contain four answer pages per sheet, "
+            "optionally preceded by one introductory page."
+        ),
+        "pdf_processing_failed": "The PDF could not be processed. Please check the file and try again.",
+        "invalid_grade": "Grade must be a finite, non-negative number.",
+    }
+    return messages.get(reason, "Could not complete the operation.")
 
 
 def create_app(database_url=None):
     app = Flask(__name__)
     database_path = Path(__file__).resolve().with_name("corrections.sqlite")
     app.config.update(
-        SECRET_KEY=os.environ.get("CORRECTION_SECRET_KEY") or os.urandom(32),
         DATABASE_URL=database_url or os.environ.get(
             "CORRECTION_DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
         ),
@@ -98,8 +212,7 @@ def create_app(database_url=None):
     app.extensions["correction_engine"] = engine
     app.extensions["correction_session_factory"] = Session
 
-    @app.get("/")
-    def index():
+    def get_correction_summary():
         with Session() as session:
             pdf_count = session.scalar(select(func.count()).select_from(ExamCorrectionPdf))
             page_count = session.scalar(select(func.count()).select_from(QuestionCorrection))
@@ -107,18 +220,28 @@ def create_app(database_url=None):
                 select(func.count()).select_from(QuestionCorrection)
                 .where(QuestionCorrection.evaluated.is_(True))
             )
-        return render_template("index.html", pdf_count=pdf_count,
-                               page_count=page_count, corrected_count=corrected_count)
+        return {
+            "pdf_count": pdf_count,
+            "page_count": page_count,
+            "corrected_count": corrected_count,
+            "pending_count": page_count - corrected_count,
+            "completion_percent": round(corrected_count * 100 / page_count) if page_count else 0,
+        }
+
+    @app.get("/")
+    def index():
+        return render_template("index.html", **get_correction_summary())
 
     @app.route("/assignments", methods=["GET", "POST"])
     def assignments():
+        error_message = None
         if request.method == "POST":
             try:
-                exam_id = positive_identifier(request.form.get("exam_id"), "Exam identifier")
-                professor_id = positive_identifier(request.form.get("professor_id"), "Professor identifier")
-                question = positive_identifier(request.form.get("question_number"), "Question number")
+                exam_id = positive_identifier(request.form.get("exam_id"), "invalid_exam_id")
+                professor_id = positive_identifier(request.form.get("professor_id"), "invalid_professor_id")
+                question = positive_identifier(request.form.get("question_number"), "invalid_question_number")
                 if question not in range(1, 5):
-                    raise ValueError("Question number must be between 1 and 4.")
+                    raise ValueError("invalid_question_range")
                 with Session.begin() as session:
                     assignment = session.scalar(select(ProfessorAssignment).where(
                         ProfessorAssignment.exam_id == exam_id,
@@ -131,31 +254,38 @@ def create_app(database_url=None):
                     else:
                         assignment.professor_id = professor_id
             except ValueError as error:
-                flash(str(error), "error")
+                error_message = get_error_message(str(error))
             except IntegrityError:
-                flash("This question assignment changed. Please try again.", "error")
+                error_message = get_error_message("assignment_changed")
             else:
-                flash("Professor assignment saved successfully.", "success")
-                return redirect(url_for("assignments"))
+                return redirect(url_for("assignments_success"))
+        return render_assignments(error=error_message)
+
+    def render_assignments(error=None, success=None):
         with Session() as session:
             rows = session.scalars(select(ProfessorAssignment).order_by(
                 ProfessorAssignment.exam_id, ProfessorAssignment.question_number
             )).all()
-        return render_template("assignments.html", assignments=rows)
+        return render_template("assignments.html", assignments=rows, error=error, success=success)
+
+    @app.get("/assignments/success")
+    def assignments_success():
+        return render_assignments(success="Professor assignment saved successfully.")
 
     @app.route("/scans/upload", methods=["GET", "POST"])
     def upload_scan():
+        error_message = None
         if request.method == "POST":
             try:
-                exam_id = positive_identifier(request.form.get("exam_id"), "Exam identifier")
+                exam_id = positive_identifier(request.form.get("exam_id"), "invalid_exam_id")
                 upload = request.files.get("file")
                 if upload is None or not upload.filename:
-                    raise ValueError("Please select a PDF file.")
+                    raise ValueError("missing_pdf")
                 if not upload.filename.lower().endswith(".pdf"):
-                    raise ValueError("Only PDF files are accepted.")
+                    raise ValueError("invalid_pdf_extension")
                 contents = upload.read()
                 if not contents:
-                    raise ValueError("The uploaded PDF is empty.")
+                    raise ValueError("empty_upload")
                 pages = process_pdf(contents)
                 # Store the complete batch only after every page has been processed.
                 with Session.begin() as session:
@@ -169,12 +299,13 @@ def create_app(database_url=None):
                         page_pdf_file=pdf, page_png_file=png,
                     ) for index, (pdf, png) in enumerate(pages)]
                     session.add(source)
-            except (ValueError, RuntimeError) as error:
-                flash(str(error), "error")
+            except ValueError as error:
+                error_message = get_error_message(str(error))
+            except RuntimeError:
+                error_message = get_error_message("pdf_processing_failed")
             else:
-                flash(f"PDF uploaded successfully: {len(pages)} page(s) ready for correction.", "success")
-                return redirect(url_for("scans"))
-        return render_template("uploadScan.html")
+                return redirect(url_for("scans_success", count=len(pages)))
+        return render_template("uploadScan.html", error=error_message)
 
     def correction_rows(evaluated=None):
         # Derive assignments at query time, so assignments made after upload apply too.
@@ -197,42 +328,65 @@ def create_app(database_url=None):
     def corrected_answers():
         return render_template("answers.html", rows=correction_rows(True), corrected=True)
 
+    @app.get("/answers/corrected/success")
+    def corrected_answers_success():
+        return render_template(
+            "answers.html", rows=correction_rows(True), corrected=True,
+            success="Correction saved successfully.",
+        )
+
     @app.get("/scans")
     def scans():
+        return render_scans()
+
+    def render_scans(success=None):
         with Session() as session:
             sources = session.scalars(select(ExamCorrectionPdf).order_by(ExamCorrectionPdf.id)).all()
-        return render_template("scans.html", sources=sources, rows=correction_rows())
+        return render_template("scans.html", sources=sources, rows=correction_rows(), success=success)
+
+    @app.get("/scans/success")
+    def scans_success():
+        count = request.args.get("count", type=int)
+        success = "PDF uploaded successfully."
+        if count is not None and count > 0:
+            success = f"PDF uploaded successfully: {count} page(s) ready for correction."
+        return render_scans(success=success)
 
     @app.route("/answers/<int:answer_id>/correct", methods=["GET", "POST"])
     def correct_answer(answer_id):
+        error_message = None
         with Session.begin() as session:
-            answer = session.get(QuestionCorrection, answer_id)
-            if answer is None:
-                abort(404)
+            answer = get_record_or_404(session, QuestionCorrection, answer_id)
             source = session.get(ExamCorrectionPdf, answer.exam_correction_pdf_id)
-            if request.method == "POST":
+            assignment = session.scalar(select(ProfessorAssignment).where(
+                ProfessorAssignment.exam_id == source.exam_id,
+                ProfessorAssignment.question_number == answer.question_number,
+            ))
+            if assignment is None:
+                error_message = get_error_message("missing_assignment")
+            elif request.method == "POST":
                 try:
                     grade = float(request.form.get("grade", ""))
                     if not math.isfinite(grade) or grade < 0:
                         raise ValueError
                 except (TypeError, ValueError):
-                    flash("Grade must be a finite, non-negative number.", "error")
+                    error_message = get_error_message("invalid_grade")
                 else:
                     answer.grade = grade
                     answer.comment = request.form.get("comment", "").strip()
                     answer.evaluated = True
-                    flash("Correction saved successfully.", "success")
-                    return redirect(url_for("corrected_answers"))
-        return render_template("correctAnswer.html", answer=answer, source=source)
+                    return redirect(url_for("corrected_answers_success"))
+        return render_template(
+            "correctAnswer.html", answer=answer, source=source,
+            assignment=assignment, error=error_message,
+        ), 409 if assignment is None else 200
 
     @app.get("/answers/<int:answer_id>/page.<extension>")
     def answer_page(answer_id, extension):
         if extension not in ("pdf", "png"):
             abort(404)
         with Session() as session:
-            answer = session.get(QuestionCorrection, answer_id)
-            if answer is None:
-                abort(404)
+            answer = get_record_or_404(session, QuestionCorrection, answer_id)
             contents = answer.page_pdf_file if extension == "pdf" else answer.page_png_file
         return send_file(BytesIO(contents), mimetype="application/pdf" if extension == "pdf" else "image/png",
                          download_name=f"answer-{answer_id}.{extension}")
@@ -240,9 +394,7 @@ def create_app(database_url=None):
     @app.get("/scans/<int:scan_id>/original.pdf")
     def original_pdf(scan_id):
         with Session() as session:
-            source = session.get(ExamCorrectionPdf, scan_id)
-            if source is None:
-                abort(404)
+            source = get_record_or_404(session, ExamCorrectionPdf, scan_id)
             contents, filename = source.pdf_file, source.filename
         return send_file(BytesIO(contents), mimetype="application/pdf",
                          download_name=filename, as_attachment=True)

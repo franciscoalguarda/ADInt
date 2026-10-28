@@ -37,7 +37,10 @@ The CSV must contain a `student_id` column, with one positive 64-bit integer per
 row (at most `9223372036854775807`).
 `student_identifier` is accepted as an alternative header. An upload is atomic:
 invalid IDs, repeated IDs, or students already enrolled cause the entire upload
-to be rejected. Because user records live in a separate service/database, this
+to be rejected. Rows with missing or extra fields and malformed CSV quoting
+are reported in the form without saving any enrollments. Additional columns
+are accepted when declared in the header.
+Because user records live in a separate service/database, this
 service stores the supplied student IDs but cannot verify that those users exist.
 
 ## Printing Service XML-RPC contract

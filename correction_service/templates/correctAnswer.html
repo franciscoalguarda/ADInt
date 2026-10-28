@@ -5,6 +5,8 @@
   <p>Status: {{ 'Corrected' if answer.evaluated else 'Pending' }}.</p>
   <a href="{{ url_for('answer_page', answer_id=answer.id, extension='pdf') }}">Open page PDF</a>
   <img class="scan" src="{{ url_for('answer_page', answer_id=answer.id, extension='png') }}" alt="Scanned answer for question {{ answer.question_number }} with detected QR codes covered">
+  {% if assignment %}
+  <p>Professor: {{ assignment.professor_id }}.</p>
   <form method="post">
     <label>Grade
       <input name="grade" type="number" min="0" step="any" required value="{{ request.form.get('grade', answer.grade if answer.evaluated else '') }}">
@@ -14,4 +16,11 @@
     </label>
     <button type="submit">Save correction</button>
   </form>
+  {% else %}
+    {% if answer.evaluated %}
+      <p>Grade: {{ answer.grade }}.</p>
+      <p class="comment">{{ answer.comment }}</p>
+    {% endif %}
+    <p><a href="{{ url_for('assignments') }}">Assign professor</a> to enable correction.</p>
+  {% endif %}
 {% endblock %}

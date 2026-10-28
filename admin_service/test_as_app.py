@@ -132,6 +132,62 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(count, exam_id)
         self.assertIsNone(enrolled_count)
 
+    def test_invalid_csv_field_counts_reject_entire_upload(self):
+        exam_id = self.schedule_exam()
+        cases = (
+            (b"student_id\n,1001\n", 2),
+            (b"student_id\n1001\n,1002\n", 3),
+            (b"student_id\n1001,unexpected\n", 2),
+            (b"student_id,note\n1001,Valid\n1002\n", 3),
+        )
+        for contents, line_number in cases:
+            with self.subTest(contents=contents):
+                response = self.client.post(
+                    f"/exams/{exam_id}/enroll",
+                    data={"file": (io.BytesIO(contents), "students.csv")},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("Location", response.headers)
+                self.assertIn(
+                    f"Invalid number of CSV fields on line {line_number}.".encode(),
+                    response.data,
+                )
+                self.assertIn(b'enctype="multipart/form-data"', response.data)
+                with self.app.extensions["admin_session_factory"]() as session:
+                    self.assertIsNone(session.scalar(select(Enrollment.student_id)))
+
+    def test_unclosed_csv_quotes_are_reported_without_saving(self):
+        exam_id = self.schedule_exam()
+        response = self.client.post(
+            f"/exams/{exam_id}/enroll",
+            data={"file": (
+                io.BytesIO(b'student_id\n1001\n"1002\n'), "students.csv"
+            )},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Invalid CSV format.", response.data)
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertIsNone(session.scalar(select(Enrollment.student_id)))
+
+    def test_valid_csv_extra_columns_and_quoted_commas_are_supported(self):
+        exam_id = self.schedule_exam()
+        contents = b'student_identifier,note\n\n1001,"Surname, Name"\n1002,Other\n'
+        response = self.client.post(
+            f"/exams/{exam_id}/enroll",
+            data={"file": (io.BytesIO(contents), "students.csv")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"2 student(s) enrolled successfully", response.data)
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertEqual(
+                session.scalars(select(Enrollment.student_id).order_by(Enrollment.student_id)).all(),
+                [1001, 1002],
+            )
+
     def test_existing_enrollment_rejects_upload_without_partial_changes(self):
         """Existing enrollments reject a batch without inserting its other students."""
         exam_id = self.schedule_exam()

@@ -10,7 +10,11 @@
           <td>{{ answer.grade if answer.evaluated else 'Pending' }}</td>
           <td class="comment">{{ answer.comment }}</td>
           <td>
+            {% if assignment %}
             <a href="{{ url_for('correct_answer', answer_id=answer.id) }}">{{ 'View / edit correction' if answer.evaluated else 'Correct answer' }}</a>
+            {% else %}
+            <a href="{{ url_for('assignments') }}">Assign professor</a>
+            {% endif %}
             <a href="{{ url_for('answer_page', answer_id=answer.id, extension='pdf') }}">Page PDF</a>
           </td>
         </tr>

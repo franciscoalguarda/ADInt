@@ -104,13 +104,16 @@ associa a identidade do aluno à folha nem filtra listas por utilizador.
 
 | Endpoint | Métodos | Funcionalidade |
 | --- | --- | --- |
-| `/` | GET | Resumo de digitalizações e correções. |
+| `/` | GET | Resumo de digitalizações, respostas pendentes, progresso e atalhos de correção. |
 | `/assignments` | GET, POST | AD_4: atribuir professor a questão de exame. |
+| `/assignments/success` | GET | Confirmar a atribuição de professor. |
 | `/scans/upload` | GET, POST | AD_5: carregar e processar uma digitalização. |
 | `/answers` | GET | PR_1: listar respostas por corrigir. |
 | `/answers/<id>/correct` | GET, POST | PR_2: consultar e guardar uma correção. |
 | `/answers/corrected` | GET | PR_3: listar respostas corrigidas. |
+| `/answers/corrected/success` | GET | Confirmar a gravação de uma correção. |
 | `/scans` | GET | ST_3 parcial: listar PDFs e respostas. |
+| `/scans/success` | GET | Confirmar o upload e apresentar as digitalizações. |
 | `/answers/<id>/page.pdf` | GET | Consultar a página processada em PDF. |
 | `/answers/<id>/page.png` | GET | Consultar a imagem processada. |
 | `/scans/<id>/original.pdf` | GET | Descarregar o PDF original. |

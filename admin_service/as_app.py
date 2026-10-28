@@ -120,7 +120,7 @@ def create_app(database_url=None, printing_rpc_url=None):
                 except UnicodeDecodeError as error:
                     raise ValueError("The CSV file must use UTF-8 encoding.") from error
 
-                reader = csv.DictReader(io.StringIO(contents))
+                reader = csv.DictReader(io.StringIO(contents), strict=True)
                 headers = {
                     header.strip().lower() for header in (reader.fieldnames or [])
                 }
@@ -139,7 +139,12 @@ def create_app(database_url=None, printing_rpc_url=None):
                     )
 
                 student_ids = []
-                for line_number, row in enumerate(reader, start=2):
+                for row in reader:
+                    line_number = reader.line_num
+                    if None in row or None in row.values():
+                        raise ValueError(
+                            f"Invalid number of CSV fields on line {line_number}."
+                        )
                     normalized_row = {
                         (key or "").strip().lower(): value
                         for key, value in row.items()
@@ -191,6 +196,8 @@ def create_app(database_url=None, printing_rpc_url=None):
                         Enrollment(exam_id=exam_id, student_id=student_id)
                         for student_id in student_ids
                     )
+            except csv.Error:
+                flash("Invalid CSV format.", "error")
             except (ValueError, IntegrityError) as error:
                 message = (
                     "One or more students are already enrolled in this exam."

@@ -1,7 +1,146 @@
 {% extends 'layout.html' %}
+
+{% block title %}Overview — Correction Service{% endblock %}
+{% block body_class %}correction-home{% endblock %}
+
+{% block page_styles %}
+  <style>
+    .correction-home { background: #f4f7fb; max-width: 1080px; }
+    .correction-home header h1 { font-size: 1.25rem; letter-spacing: -.03em; }
+    .correction-dashboard { display: grid; gap: 1.75rem; padding: 1.5rem 0; }
+    .correction-dashboard h2, .correction-dashboard h3, .correction-dashboard p, .correction-dashboard dl { margin: 0; }
+    .correction-intro { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; }
+    .correction-eyebrow { color: #0759a5; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .correction-intro h2 { margin: .5rem 0 .65rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; letter-spacing: -.045em; }
+    .correction-description { color: #596575; max-width: 37rem; }
+    .correction-button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.75rem; box-sizing: border-box; padding: .6rem 1rem; border-radius: .65rem; background: #0759a5; color: white; font-size: .9rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .correction-button:hover { background: #064780; }
+    .correction-dashboard a:focus-visible { outline: 3px solid #0759a5; outline-offset: 4px; }
+    .correction-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+    .correction-stat { display: flex; flex-direction: column; justify-content: space-between; gap: .7rem; padding: 1.2rem 1.3rem; border: 1px solid #dce4ee; border-radius: .85rem; background: white; }
+    .correction-stat dt { color: #596575; font-size: .85rem; }
+    .correction-stat dd { margin: 0; color: #123963; font-size: 2.2rem; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .correction-stat--done dd { color: #247047; }
+    .correction-stat--pending { background: #eaf2fc; border-color: #d0e0f4; }
+    .correction-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .correction-card { display: flex; flex-direction: column; align-items: flex-start; gap: .8rem; padding: 1.5rem; border: 1px solid #dce4ee; border-radius: 1rem; background: white; color: #20242a; text-decoration: none; }
+    .correction-card:hover { border-color: #7ba6d2; box-shadow: 0 6px 20px #173d6510; }
+    .correction-icon { display: grid; place-items: center; width: 2.8rem; height: 2.8rem; border-radius: .8rem; background: #eaf2fc; color: #0759a5; }
+    .correction-icon svg { width: 1.5rem; height: 1.5rem; }
+    .correction-card h3 { font-size: 1.1rem; letter-spacing: -.02em; }
+    .correction-card p { color: #596575; font-size: .9rem; }
+    .correction-card-action { margin-top: auto; padding-top: .7rem; color: #0759a5; font-size: .9rem; font-weight: 600; }
+    .correction-progress { padding: 1.4rem 1.5rem; border: 1px solid #dce4ee; border-radius: 1rem; background: white; }
+    .correction-progress-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .75rem; }
+    .correction-progress h3 { font-size: 1.1rem; }
+    .correction-percent { color: #247047; font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .correction-progress progress { display: block; width: 100%; height: .75rem; margin: .8rem 0; border: 0; border-radius: 1rem; overflow: hidden; appearance: none; accent-color: #2c8856; background: #e8eef3; }
+    .correction-progress progress::-webkit-progress-bar { background: #e8eef3; border-radius: 1rem; }
+    .correction-progress progress::-webkit-progress-value { background: #2c8856; border-radius: 1rem; }
+    .correction-progress progress::-moz-progress-bar { background: #2c8856; border-radius: 1rem; }
+    .correction-progress p { color: #596575; font-size: .9rem; }
+    .correction-empty { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; padding: 1.4rem 1.5rem; background: #eaf2fc; border: 1px solid #d0e0f4; border-radius: 1rem; }
+    .correction-empty h3 { font-size: 1.1rem; margin-bottom: .35rem; }
+    .correction-empty p { color: #455c76; font-size: .9rem; max-width: 38rem; }
+    .correction-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; padding-bottom: 0; border-bottom: 0; }
+    .correction-link { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.1rem 1.3rem; border: 1px solid #dce4ee; border-radius: .8rem; background: white; color: #0759a5; font-size: .95rem; font-weight: 600; text-decoration: none; }
+    .correction-link:hover { border-color: #7ba6d2; }
+    @media (max-width: 700px) {
+      .correction-intro, .correction-empty { flex-direction: column; align-items: stretch; }
+      .correction-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .correction-actions, .correction-links { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 360px) {
+      .correction-stat { padding: 1rem; }
+      .correction-progress-heading { align-items: flex-start; flex-direction: column; gap: .4rem; }
+    }
+  </style>
+{% endblock %}
+
 {% block content %}
-  <h2>Exam correction</h2>
-  <p>{{ pdf_count }} uploaded PDF(s), {{ page_count }} answer(s), {{ corrected_count }} corrected answer(s).</p>
-  <p>Assign professors to exam questions, upload scanned answers and record a grade and comments for each page.</p>
-  <p>Part 1: all pages and answers are available without signing in. Exam and professor identifiers are entered directly.</p>
+  <div class="correction-dashboard">
+    <section class="correction-intro" aria-labelledby="overview-title">
+      <div>
+        <p class="correction-eyebrow">National exams · Exam correction</p>
+        <h2 id="overview-title">Manage exam corrections</h2>
+        <p class="correction-description">Assign professors, upload scanned answers and keep track of every correction.</p>
+      </div>
+    </section>
+
+    <dl class="correction-stats" aria-label="Correction overview">
+      <div class="correction-stat">
+        <dt>Uploaded PDFs</dt>
+        <dd id="pdf-count">{{ pdf_count }}</dd>
+      </div>
+      <div class="correction-stat">
+        <dt>Answer pages</dt>
+        <dd id="page-count">{{ page_count }}</dd>
+      </div>
+      <div class="correction-stat correction-stat--done">
+        <dt>Corrected answers</dt>
+        <dd id="corrected-count">{{ corrected_count }}</dd>
+      </div>
+      <div class="correction-stat correction-stat--pending">
+        <dt>Awaiting correction</dt>
+        <dd id="pending-count">{{ pending_count }}</dd>
+      </div>
+    </dl>
+
+    {% if not pdf_count %}
+      <section class="correction-empty" id="empty-state" aria-labelledby="empty-title">
+        <div>
+          <h3 id="empty-title">No scans uploaded yet</h3>
+          <p>Start with an exam PDF. Its answer pages will be available here for correction.</p>
+        </div>
+        <a class="correction-button" href="{{ url_for('upload_scan') }}">Upload your first scan</a>
+      </section>
+    {% endif %}
+
+    <section class="correction-actions" aria-label="Correction actions">
+      <a class="correction-card" href="{{ url_for('assignments') }}">
+        <span class="correction-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 21v-2a6 6 0 0 0-4-5.65"/>
+          </svg>
+        </span>
+        <h3>Assign professors</h3>
+        <p>Choose the professor responsible for each exam question.</p>
+        <span class="correction-card-action">Manage assignments <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="correction-card" href="{{ url_for('upload_scan') }}">
+        <span class="correction-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M12 18v-7M9 14l3-3 3 3"/>
+          </svg>
+        </span>
+        <h3>Upload a scan</h3>
+        <p>Turn a scanned exam PDF into individual answer pages.</p>
+        <span class="correction-card-action">Upload PDF <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="correction-card" href="{{ url_for('pending_answers') }}">
+        <span class="correction-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M16 3l5 5M10 14l-1 4 4-1L22 7l-4-4z"/>
+          </svg>
+        </span>
+        <h3>Correct answers</h3>
+        <p>Review answer pages and record grades and feedback.</p>
+        <span class="correction-card-action">Start correcting <span aria-hidden="true">→</span></span>
+      </a>
+    </section>
+
+    <section class="correction-progress" aria-labelledby="progress-title">
+      <div class="correction-progress-heading">
+        <h3 id="progress-title">Correction progress</h3>
+        <span class="correction-percent" id="completion-percent">{{ completion_percent }}%</span>
+      </div>
+      <progress value="{{ corrected_count }}" max="{{ page_count or 1 }}" aria-labelledby="progress-title" aria-describedby="progress-description">{{ completion_percent }}%</progress>
+      <p id="progress-description">{{ corrected_count }} of {{ page_count }} answers corrected.{% if page_count and not pending_count %} All available answers have been corrected.{% endif %}</p>
+    </section>
+
+    <nav class="correction-links" aria-label="Browse correction records">
+      <a class="correction-link" href="{{ url_for('corrected_answers') }}">Corrected answers <span aria-hidden="true">→</span></a>
+      <a class="correction-link" href="{{ url_for('scans') }}">Scans and corrections <span aria-hidden="true">→</span></a>
+    </nav>
+  </div>
 {% endblock %}
