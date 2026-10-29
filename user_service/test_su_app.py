@@ -1,17 +1,20 @@
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
-if __package__:
-    from . import su_app as user_service
-else:
-    import su_app as user_service
+with patch.dict(os.environ, {"USER_DATABASE_URL": "sqlite:///:memory:"}):
+    if __package__:
+        from . import su_app as user_service
+    else:
+        import su_app as user_service
 
 
 class UserServiceTests(unittest.TestCase):
@@ -477,6 +480,46 @@ class UserServiceTests(unittest.TestCase):
         self.assertNotIn(b'class="message error"', response.data)
         refreshed = self.client.get(response.request.full_path)
         self.assertIn(b"No new users were imported.", refreshed.data)
+
+    '''
+        Verify that every occurrence of an existing ID is checked, so a matching
+        row cannot hide a later name, role, or password conflict in the same CSV.
+        The complete new batch must be rejected without altering existing users.
+    '''
+    def test_repeated_existing_ids_cannot_hide_conflicting_data(self):
+        first_csv = b"id,name,password,role\n10,Henrique Matias,original-secret,Student\n"
+        self.assertEqual(self.client.post("/users/bulk-add", data={
+            "file": (io.BytesIO(first_csv), "first.csv"),
+        }).status_code, 302)
+        cases = (
+            ("Leonardo", "original-secret", "Student"),
+            ("Henrique Matias", "replacement-secret", "Student"),
+            ("Henrique Matias", "original-secret", "Professor"),
+        )
+        for name, password, role in cases:
+            with self.subTest(name=name, role=role, changed_password=password != "original-secret"):
+                contents = (
+                    "id,name,password,role\n"
+                    "10,Henrique Matias,original-secret,Student\n"
+                    "20,New User,new-secret,Student\n"
+                    f"010,{name},{password},{role}\n"
+                )
+                response = self.client.post("/users/bulk-add", data={
+                    "file": (io.BytesIO(contents.encode()), "second.csv"),
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("Location", response.headers)
+                self.assertIn(
+                    b"User identifier 10 conflicts with existing user data on CSV line 4.",
+                    response.data,
+                )
+                self.assertIn(b"No users were imported.", response.data)
+                with self.session_factory() as session:
+                    self.assertEqual(session.scalars(select(user_service.User.id)).all(), [10])
+                    existing = session.get(user_service.User, 10)
+                    self.assertEqual(existing.name, "Henrique Matias")
+                    self.assertTrue(check_password_hash(existing.password, "original-secret"))
+                    self.assertEqual([assigned.name for assigned in existing.roles], ["Student"])
 
     '''
         Verify that files without user rows remain invalid, rather than being

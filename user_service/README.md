@@ -102,9 +102,12 @@ O nome é comparado após remover espaços nas extremidades; os papéis são
 comparados sem considerar a ordem ou repetições; a password é verificada contra
 o hash guardado e deve coincidir exatamente.
 
-Para IDs repetidos no mesmo ficheiro, considera apenas a primeira ocorrência,
-mesmo que as seguintes tenham dados diferentes. Os IDs são comparados como
-inteiros: `1001` e `01001` identificam o mesmo utilizador.
+Para utilizadores que já existiam antes da importação, todas as ocorrências do
+ID são comparadas com os dados guardados. Uma linha correta não esconde um
+conflito numa ocorrência posterior. Para IDs novos repetidos no mesmo ficheiro,
+considera apenas a primeira ocorrência, mesmo que as seguintes tenham dados
+diferentes. Os IDs são comparados como inteiros: `1001` e `01001` identificam o
+mesmo utilizador.
 
 Os utilizadores novos são guardados numa única transação. Dados inválidos num
 utilizador novo anulam todas as novas inserções dessa importação. Erros na
@@ -120,9 +123,11 @@ nem altera os dados dos existentes.
 
 ## Base de dados
 
-O serviço utiliza exclusivamente o ficheiro SQLite `user_service/users.sqlite`.
+Por omissão, o serviço utiliza o ficheiro SQLite `user_service/users.sqlite`.
 O caminho é calculado a partir da localização de `su_app.py`, independentemente
 da pasta a partir da qual o serviço é iniciado.
+`USER_DATABASE_URL` permite configurar outra ligação SQLAlchemy, incluindo
+uma base em memória para inicialização isolada durante os testes.
 
 As tabelas inexistentes e os papéis predefinidos são criados no arranque:
 
@@ -144,6 +149,8 @@ a utilizadores ou papéis inexistentes e a remoção direta de registos referenc
 ```
 
 Os testes de criação e importação usam uma base de dados temporária.
+A importação inicial do módulo usa uma base em memória, sem criar ou modificar
+`user_service/users.sqlite`.
 Também são verificadas as contagens da página inicial, incluindo utilizadores
 com vários papéis, a preservação dos campos após erros e os redirecionamentos
 de sucesso.

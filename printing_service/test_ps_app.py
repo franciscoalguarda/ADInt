@@ -9,13 +9,13 @@ from xmlrpc.client import Fault, ServerProxy
 
 import pymupdf
 import qrcode
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 if __package__:
-    from .ps_app import create_app, create_server
+    from .ps_app import create_app, create_server, restore_committed_pdf
     from .printing_data import PrintedExam, ResolutionSheet
 else:
-    from ps_app import create_app, create_server
+    from ps_app import create_app, create_server, restore_committed_pdf
     from printing_data import PrintedExam, ResolutionSheet
 
 
@@ -331,6 +331,46 @@ class PrintingServiceTests(unittest.TestCase):
             self.assertEqual(document.page_count, 12)
 
     '''
+        Verify that a database commit failure restores the previous output PDF
+        and sheet IDs, or removes the output when the first order is rolled back.
+        A subsequent order must still succeed.
+    '''
+    def test_commit_failure_restores_output_to_the_committed_database(self):
+        factory = self.server.app.extensions["printing_session_factory"]
+        for exam_id, existing in ((12, True), (13, False)):
+            with self.subTest(existing=existing):
+                output_path = self.output_dir / f"exam_{exam_id}.pdf"
+                if existing:
+                    self.proxy.print_exam(exam_id, self.exam_date.isoformat(), "Algorithms", [10])
+                    original_pdf = output_path.read_bytes()
+                    with factory() as session:
+                        original_ids = [(sheet.student_id, sheet.id) for sheet in session.get(PrintedExam, exam_id).sheets]
+
+                def fail_commit(session):
+                    raise RuntimeError("Simulated database commit failure")
+
+                event.listen(factory.class_, "before_commit", fail_commit, once=True)
+                try:
+                    with self.assertLogs(self.server.app.logger, level="ERROR"):
+                        with self.assertRaises(Fault):
+                            self.proxy.print_exam(exam_id, self.exam_date.isoformat(), "Algorithms", [10, 20])
+                finally:
+                    event.remove(factory.class_, "before_commit", fail_commit)
+
+                with factory() as session:
+                    exam = session.get(PrintedExam, exam_id)
+                    if existing:
+                        self.assertEqual(exam.pdf_file, original_pdf)
+                        self.assertEqual(output_path.read_bytes(), original_pdf)
+                        self.assertEqual([(sheet.student_id, sheet.id) for sheet in exam.sheets], original_ids)
+                    else:
+                        self.assertIsNone(exam)
+                        self.assertFalse(output_path.exists())
+                self.proxy.print_exam(exam_id, self.exam_date.isoformat(), "Algorithms", [10, 20])
+                with factory() as session:
+                    self.assertEqual(output_path.read_bytes(), session.get(PrintedExam, exam_id).pdf_file)
+
+    '''
         Verify that decimal XML-RPC strings support exam and student IDs beyond
         32 bits, including the signed 64-bit maximum, and produce an accessible PDF.
     '''
@@ -348,6 +388,39 @@ class PrintingServiceTests(unittest.TestCase):
             with pymupdf.open(stream=exam.pdf_file, filetype="pdf") as document:
                 self.assertEqual(document.page_count, 8)
         self.assertEqual(self.client.get(f"/exams/{exam_id}/pdf").status_code, 200)
+
+    '''
+        Verify that recovery after a failed commit preserves a newer successful
+        printing order instead of restoring an outdated PDF or removing new sheets.
+    '''
+    def test_commit_recovery_preserves_an_order_completed_before_recovery(self):
+        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+        factory = self.server.app.extensions["printing_session_factory"]
+        with factory() as session:
+            original_id = session.get(PrintedExam, 12).sheets[0].id
+
+        def fail_commit(session):
+            raise RuntimeError("Simulated database commit failure")
+
+        def recover_after_another_order(*args):
+            with ServerProxy(f"http://127.0.0.1:{self.server.server_address[1]}") as proxy:
+                proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 30])
+            restore_committed_pdf(*args)
+
+        event.listen(factory.class_, "before_commit", fail_commit, once=True)
+        try:
+            with patch(f"{create_app.__module__}.restore_committed_pdf", side_effect=recover_after_another_order):
+                with self.assertLogs(self.server.app.logger, level="ERROR"):
+                    with self.assertRaises(Fault):
+                        self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        finally:
+            event.remove(factory.class_, "before_commit", fail_commit)
+
+        with factory() as session:
+            exam = session.get(PrintedExam, 12)
+            self.assertEqual({sheet.student_id for sheet in exam.sheets}, {10, 30})
+            self.assertEqual(next(sheet.id for sheet in exam.sheets if sheet.student_id == 10), original_id)
+            self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), exam.pdf_file)
 
     '''
         Verify that invalid, nonpositive, oversized, boolean, and fractional exam

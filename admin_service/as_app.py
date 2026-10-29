@@ -4,7 +4,8 @@ import os
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
-from xmlrpc.client import Fault, ProtocolError, SafeTransport, ServerProxy, Transport
+from xml.parsers.expat import ExpatError
+from xmlrpc.client import Fault, ProtocolError, ResponseError, SafeTransport, ServerProxy, Transport
 
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 from sqlalchemy import create_engine, event, func, select
@@ -354,7 +355,7 @@ def create_app(database_url=None, printing_rpc_url=None):
                         str(exam_data[0]), exam_data[1], exam_data[2],
                         [str(student_id) for student_id in student_ids],
                     )
-            except Fault as error:
+            except (Fault, ResponseError, ExpatError, ValueError, TypeError) as error:
                 raise ValueError("printing_failed") from error
             except (OSError, ProtocolError) as error:
                 raise ValueError("printing_unavailable") from error

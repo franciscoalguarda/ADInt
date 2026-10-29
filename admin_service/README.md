@@ -96,8 +96,10 @@ lista de textos decimais. Os IDs continuam a ser inteiros no SQLite; o texto
 permite transportá-los sem o limite de 32 bits dos inteiros XML-RPC.
 
 É necessário inscrever alunos antes de pedir a impressão. Falhas de comunicação,
-erros XML-RPC e rejeições do pedido apresentam mensagens em inglês. Após sucesso,
-a aplicação apresenta uma confirmação padrão. Os PDFs podem ser consultados
+erros XML-RPC e rejeições do pedido apresentam mensagens em inglês. Respostas
+com XML inválido ou sem uma resposta XML-RPC válida também apresentam uma
+mensagem de erro, sem provocar HTTP 500. Após sucesso, a aplicação apresenta
+uma confirmação padrão. Os PDFs podem ser consultados
 no Printing Service, que gera quatro páginas por aluno, com um identificador
 único em QR code por folha. Consultar `printing_service/README.md` para executar
 esse serviço.
@@ -126,6 +128,8 @@ Reiniciar ambos os serviços depois de atualizar o código.
 ```
 
 Os testes usam bases de dados temporárias e simulam a comunicação XML-RPC.
+A aplicação criada ao importar o módulo de testes usa uma base em memória,
+sem criar nem modificar `admin_service/admin.sqlite`.
 Verificam validações, importação atómica das novas inscrições, exclusão de duplicados,
 contagem de novas inscrições, preservação dos campos, mensagens
 sem cookies, confirmações, IDs de 64 bits e integridade das inscrições.

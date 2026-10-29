@@ -25,7 +25,7 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.root = Path(self.temp_dir.name)
         with patch.dict(os.environ, {
-            "ADMIN_DATABASE_URL": f"sqlite:///{(self.root / 'startup.sqlite').as_posix()}",
+            "ADMIN_DATABASE_URL": "sqlite:///:memory:",
         }):
             from admin_service import as_app
         as_app.app.extensions["admin_engine"].dispose()

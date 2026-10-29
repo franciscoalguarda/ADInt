@@ -128,6 +128,18 @@ def get_exam_or_404(session, exam_id):
     return exam
 
 
+def restore_committed_pdf(output_dir, exam_id, session_factory):
+    # Read under a fresh write lock so recovery cannot overwrite a newer order.
+    with session_factory.begin() as session:
+        if session.bind.dialect.name == "sqlite":
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        exam = session.get(PrintedExam, exam_id)
+        if exam is None:
+            (Path(output_dir) / f"exam_{exam_id}.pdf").unlink(missing_ok=True)
+        else:
+            write_pdf_copy(output_dir, exam_id, exam.pdf_file)
+
+
 def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLATE_PATH):
     output_dir = Path(output_dir)
     template_path = Path(template_path)
@@ -159,39 +171,47 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
         if len(student_ids) != len(set(student_ids)):
             raise Fault(1, "student_ids must not contain duplicates.")
 
-        with session_factory.begin() as session:
-            if session.bind.dialect.name == "sqlite":
-                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-            exam = session.get(PrintedExam, exam_id)
-            changed = exam is None
-            if exam is None:
-                exam = PrintedExam(
-                    id=exam_id,
-                    exam_date=parsed_date,
-                    course=course,
-                    pdf_file=b"",
-                )
-                session.add(exam)
-            else:
-                if exam.exam_date < date.today():
-                    raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
-                changed = exam.exam_date != parsed_date or exam.course != course
-                exam.exam_date = parsed_date
-                exam.course = course
+        published = False
+        try:
+            with session_factory.begin() as session:
+                if session.bind.dialect.name == "sqlite":
+                    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                exam = session.get(PrintedExam, exam_id)
+                changed = exam is None
+                if exam is None:
+                    exam = PrintedExam(
+                        id=exam_id,
+                        exam_date=parsed_date,
+                        course=course,
+                        pdf_file=b"",
+                    )
+                    session.add(exam)
+                else:
+                    if exam.exam_date < date.today():
+                        raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
+                    changed = exam.exam_date != parsed_date or exam.course != course
+                    exam.exam_date = parsed_date
+                    exam.course = course
 
-            existing_students = {sheet.student_id for sheet in exam.sheets}
-            for student_id in student_ids:
-                if student_id not in existing_students:
-                    exam.sheets.append(ResolutionSheet(student_id=student_id))
-                    changed = True
-            session.flush()
-            if changed or not exam.pdf_file:
-                exam.pdf_file = create_exam_pdf(
-                    template_path, [sheet.id for sheet in exam.sheets]
-                )
+                existing_students = {sheet.student_id for sheet in exam.sheets}
+                for student_id in student_ids:
+                    if student_id not in existing_students:
+                        exam.sheets.append(ResolutionSheet(student_id=student_id))
+                        changed = True
+                session.flush()
+                if changed or not exam.pdf_file:
+                    exam.pdf_file = create_exam_pdf(
+                        template_path, [sheet.id for sheet in exam.sheets]
+                    )
 
-            # Publish before releasing the write transaction to preserve the latest copy.
-            output_path = write_pdf_copy(output_dir, exam_id, exam.pdf_file)
+                # Publish while holding the write lock, then restore committed
+                # contents if the database transaction cannot be completed.
+                output_path = write_pdf_copy(output_dir, exam_id, exam.pdf_file)
+                published = True
+        except Exception:
+            if published:
+                restore_committed_pdf(output_dir, exam_id, session_factory)
+            raise
 
         return f"Generated PDF: {output_path.resolve()}"
 

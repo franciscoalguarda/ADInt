@@ -1,4 +1,5 @@
 import io
+import os
 import sqlite3
 import tempfile
 import threading
@@ -16,7 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from admin_data import Enrollment, Exam
-from as_app import TimeoutSafeTransport, TimeoutTransport, create_app
+with patch.dict(os.environ, {"ADMIN_DATABASE_URL": "sqlite:///:memory:"}):
+    from as_app import TimeoutSafeTransport, TimeoutTransport, create_app
 
 
 class AdminServiceTests(unittest.TestCase):
@@ -742,6 +744,55 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/exams/printing/success")
         self.assertNotIn("Set-Cookie", response.headers)
+
+    '''
+        Verify that malformed XML, non-RPC replies, and invalid XML-RPC values
+        display the printing error instead of causing an internal server error.
+    '''
+    def test_invalid_xmlrpc_replies_are_reported_without_server_errors(self):
+        class InvalidPrintingResponse(BaseHTTPRequestHandler):
+            payload = b""
+
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/xml")
+                self.send_header("Content-Length", str(len(self.payload)))
+                self.end_headers()
+                self.wfile.write(self.payload)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), InvalidPrintingResponse)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.app.config["PRINTING_RPC_URL"] = f"http://127.0.0.1:{server.server_port}"
+        exam_id = self.schedule_exam()
+        self.client.post(f"/exams/{exam_id}/enroll", data={
+            "file": (io.BytesIO(b"student_id\n10\n"), "students.csv"),
+        })
+        try:
+            for payload in (
+                b"not XML",
+                b"<html><body>Unexpected reply</body></html>",
+                b"<methodResponse><params><param><value><boolean>invalid</boolean>"
+                b"</value></param></params></methodResponse>",
+                b"<methodResponse><params><param><value><int>invalid</int>"
+                b"</value></param></params></methodResponse>",
+            ):
+                with self.subTest(payload=payload):
+                    InvalidPrintingResponse.payload = payload
+                    with patch("as_app.ServerProxy", wraps=ServerProxy):
+                        response = self.client.post(f"/exams/{exam_id}/order-printing")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertNotIn("Location", response.headers)
+                    self.assertIn(b"The Printing Service could not complete the printing order.", response.data)
+                    self.assertNotIn(b"Printing order sent successfully.", response.data)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
     '''
         Verify that printing is blocked after the exam date without an RPC call

@@ -1,4 +1,6 @@
+import base64
 import io
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -14,16 +16,17 @@ import pymupdf
 from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 
-if __package__:
-    from . import cs_app as correction_service
-    from .correction_data import (
-        ExamCorrectionPdf,
-        ProfessorAssignment,
-        QuestionCorrection,
-    )
-else:
-    import cs_app as correction_service
-    from correction_data import ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
+with patch.dict(os.environ, {"CORRECTION_DATABASE_URL": "sqlite:///:memory:"}):
+    if __package__:
+        from . import cs_app as correction_service
+        from .correction_data import (
+            ExamCorrectionPdf,
+            ProfessorAssignment,
+            QuestionCorrection,
+        )
+    else:
+        import cs_app as correction_service
+        from correction_data import ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
 
 
 class CorrectionServiceTests(unittest.TestCase):
@@ -564,6 +567,59 @@ class CorrectionServiceTests(unittest.TestCase):
                 )),
                 4,
             )
+
+    '''
+        Verify that repeated QR codes produced by the Printing Service for sheet
+        10 are hidden in every corner of rotated PNG and PDF answer pages, even
+        when whole-page detection misses them, while the original scan is preserved.
+    '''
+    def test_repeated_printing_qr_codes_are_hidden_in_every_corner(self):
+        # PNG fixture generated with the Printing Service's qrcode.make("10").
+        qr_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAASIAAAEiAQAAAAB1xeIbAAABg0lEQVR4nO1ay26DMBCc"
+            "NUg9mj/op5BPx5/SD6iEj5GItlo/kjSHNhewsXcOCMxIGY3Xy2BCjP/hzBskQFkZ6"
+            "kSGOpGhTmSoE6WdoIQRRNON6OLzyKWori5YMwtWOfsaZWAIA3wO9Sdn+XuNZ4RlUFx"
+            "Xy6zx5ZrdJ4PK6zIdek/AuFWgy3TkvZXW7gGGn2LZ8wnUmxZYLoSaCaALBnH9FmNO"
+            "aV0d1D3frxm4UloGJXWZDliIUXLmR5OXurcyFiKn3F5qVW9aYDn6SBMw/wr5pXV"
+            "1UPe82A28xJGBeYm2DzIfWvc7e89r8DlNQJqPx1mtlWMaYJFEHMCHxiM7CT71HN3"
+            "POSbnMLClV9p5uRLDfmvGPCDnJEjjke4TEB+92nP2z5iCYLuVtBkP+Yb2+2P2MWe"
+            "Jl3LgJTb9vX7xb/S4lwYXnro2bWZy3epNUywOkJJnXuULViW6WmbZFOjh5IuJe9p"
+            "VK6urq5zzVPz6brWv96T/jap8dRhlJagTGepEhjqR8Z4TP78pzlgAMh3bAAAAAElFTkSuQmCC"
+        )
+        detector = cv2.QRCodeDetector()
+
+        def corners(image):
+            height, width = image.shape[:2]
+            for x, y in ((36, 36), (width - 180, 36), (36, height - 180), (width - 180, height - 180)):
+                yield image[y - 16:y + 160, x - 16:x + 160]
+
+        with pymupdf.open() as document:
+            for rotation in (0, 90, 180, 270):
+                page = document.new_page(width=595, height=842)
+                page.insert_text((200, 400), "Visible answer content")
+                for x, y in ((18, 18), (505, 18), (18, 752), (505, 752)):
+                    page.insert_image(pymupdf.Rect(x, y, x + 72, y + 72), stream=qr_png)
+                page.set_rotation(rotation)
+                pixmap = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), colorspace=pymupdf.csGRAY, alpha=False)
+                image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width)
+                for corner in corners(image):
+                    self.assertEqual(detector.detectAndDecode(corner)[0], "10")
+            contents = document.tobytes()
+
+        self.assertEqual(self.upload_pdf(contents).status_code, 302)
+        self.assertEqual(self.client.get("/scans/1/original.pdf").data, contents)
+        with self.session_factory() as session:
+            answers = session.scalars(select(QuestionCorrection).order_by(QuestionCorrection.page_number)).all()
+            self.assertEqual(len(answers), 4)
+            for answer in answers:
+                png = cv2.imdecode(np.frombuffer(answer.page_png_file, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+                with pymupdf.open(stream=answer.page_pdf_file, filetype="pdf") as masked:
+                    pixmap = masked[0].get_pixmap(matrix=pymupdf.Matrix(2, 2), colorspace=pymupdf.csGRAY, alpha=False)
+                    pdf_image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width)
+                for image in (png, pdf_image):
+                    for corner in corners(image):
+                        self.assertEqual(detector.detectAndDecode(corner)[0], "")
+                        self.assertTrue(np.any((corner >= 126) & (corner <= 129)))
 
     '''
         Verify that NaN preserves the form and leaves the answer ungraded,

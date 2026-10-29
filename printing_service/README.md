@@ -79,6 +79,10 @@ O PDF também é escrito em `printing_service/output/exam_<exam_id>.pdf` como
 cópia da versão guardada na base. A página de consulta disponibiliza a versão
 da base de dados. As atualizações da cópia usam um ficheiro temporário para
 evitar publicar PDFs incompletos.
+Se a confirmação da transação falhar depois de gravar a cópia, o serviço
+repõe o PDF confirmado na base de dados. A recuperação obtém um novo bloqueio
+de escrita e consulta a versão atual, para não substituir um pedido mais recente.
+Se falhar o primeiro pedido e não existir exame confirmado, remove a cópia.
 
 Configuração opcional:
 
@@ -97,6 +101,7 @@ Reiniciar o Admin e o Printing Service depois de atualizar o código.
 
 Os testes usam bases e diretórios temporários. Verificam a geração dos PDFs,
 os QR codes estáveis, pedidos repetidos e simultâneos, o bloqueio por data e
-as falhas na escrita da cópia. `test_admin_printing.py` testa os dois serviços
-com o protocolo XML-RPC real, incluindo a preservação do PDF após novas inscrições
+as falhas na escrita da cópia. Os testes cobrem também falhas na confirmação da
+transação e a recuperação da cópia de output. `test_admin_printing.py` testa os
+dois serviços com o protocolo XML-RPC real, incluindo a preservação do PDF após novas inscrições
 e a atualização de oito para dezasseis páginas apenas após um novo pedido.

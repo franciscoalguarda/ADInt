@@ -39,64 +39,56 @@ def split_pdf_into_pages(document: pymupdf.Document) -> list[pymupdf.Document]:
 
 
 def cover_qr_codes_with_gray_squares(page_documents: list[pymupdf.Document]) -> None:
-	"""Overlay a gray square on each QR code detected in the pages.
+    """Cover QR codes found across the page and in overlapping image regions."""
+    detector = cv2.QRCodeDetector()
+    for page_document in page_documents:
+        page = page_document[0]
+        pixmap = page.get_pixmap(
+            matrix=pymupdf.Matrix(2, 2), colorspace=pymupdf.csGRAY, alpha=False
+        )
+        grayscale = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+            pixmap.height, pixmap.width
+        )
+        height, width = grayscale.shape
+        tile_width, tile_height = max(1, width // 2), max(1, height // 2)
+        regions = [(0, 0, width, height)]
+        regions.extend(
+            (x, y, tile_width, tile_height)
+            for y in sorted({0, (height - tile_height) // 2, height - tile_height})
+            for x in sorted({0, (width - tile_width) // 2, width - tile_width})
+        )
+        boxes = []
+        for x, y, region_width, region_height in regions:
+            region = grayscale[y:y + region_height, x:x + region_width]
+            # Whole-page multi-code detection can miss repeated codes. Single-code
+            # detection in overlapping regions also finds codes across tile edges.
+            found, points = detector.detectMulti(region)
+            if not found or points is None:
+                found, points = detector.detect(region)
+            if not found or points is None:
+                continue
+            for qr_points in points.reshape(-1, 4, 2):
+                left, right = qr_points[:, 0].min() + x, qr_points[:, 0].max() + x
+                top, bottom = qr_points[:, 1].min() + y, qr_points[:, 1].max() + y
+                center_x, center_y = (left + right) / 2, (top + bottom) / 2
+                if any(old_left <= center_x <= old_right and old_top <= center_y <= old_bottom
+                       for old_left, old_top, old_right, old_bottom in boxes):
+                    continue
+                boxes.append((left, top, right, bottom))
 
-	Args:
-		page_documents: One-page PDF documents to scan and modify.
-
-	Returns:
-		None. The supplied page documents are modified in place.
-
-	The square is slightly larger than the detected QR code and is drawn
-	directly onto each page. Documents with no detected QR codes are unchanged.
-	"""
-	# Use OpenCV's QR code detector to find QR codes in the pages.
-	detector = cv2.QRCodeDetector()
-	gray = (0.5, 0.5, 0.5)
-
-	for page_document in page_documents:
-		page = page_document[0]
-		# Get a high-resolution pixmap of the page to detect QR codes accurately.
-		pixmap = page.get_pixmap(
-			matrix=pymupdf.Matrix(2, 2),
-			colorspace=pymupdf.csRGB,
-			alpha=False,
-		)
-		# Convert the pixmap to a NumPy array and then to grayscale for QR detection.
-		image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
-			pixmap.height,
-			pixmap.width,
-			3,
-		)
-		# Convert the RGB image to grayscale for QR code detection.
-		grayscale = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-		# Detect QR codes and get their corner points.
-		_, _, points, _ = detector.detectAndDecodeMulti(grayscale)
-		if points is None:
-			continue
-
-		# Calculate the scaling factors to map pixmap coordinates back to page coordinates.
-		scale_x = pixmap.width / page.rect.width
-		scale_y = pixmap.height / page.rect.height
-		# For each detected QR code, calculate its bounding box and draw a gray square over it.
-		for qr_points in points:
-			qr_points = qr_points.reshape(-1, 2)
-			left, right = qr_points[:, 0].min(), qr_points[:, 0].max()
-			top, bottom = qr_points[:, 1].min(), qr_points[:, 1].max()
-			side = max(right - left, bottom - top) * 1.1
-			center_x = (left + right) / 2
-			center_y = (top + bottom) / 2
-			page.draw_rect(
-				pymupdf.Rect(
-					page.rect.x0 + (center_x - side / 2) / scale_x,
-					page.rect.y0 + (center_y - side / 2) / scale_y,
-					page.rect.x0 + (center_x + side / 2) / scale_x,
-					page.rect.y0 + (center_y + side / 2) / scale_y,
-				),
-				color=None,
-				fill=gray,
-				overlay=True,
-			)
+        scale_x, scale_y = width / page.rect.width, height / page.rect.height
+        for left, top, right, bottom in boxes:
+            side = max(right - left, bottom - top) * 1.1
+            center_x, center_y = (left + right) / 2, (top + bottom) / 2
+            page.draw_rect(
+                pymupdf.Rect(
+                    page.rect.x0 + (center_x - side / 2) / scale_x,
+                    page.rect.y0 + (center_y - side / 2) / scale_y,
+                    page.rect.x0 + (center_x + side / 2) / scale_x,
+                    page.rect.y0 + (center_y + side / 2) / scale_y,
+                ),
+                color=None, fill=(0.5, 0.5, 0.5), overlay=True,
+            )
 
 
 def process_pdf(contents):

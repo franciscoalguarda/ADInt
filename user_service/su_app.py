@@ -1,5 +1,6 @@
 import csv
 import io
+import os
 
 from flask import Flask, redirect, render_template, request, url_for
 from sqlalchemy import create_engine, event, func, select
@@ -8,7 +9,10 @@ from sqlalchemy.exc import IntegrityError
 from os import path
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from user_data import Role, User, Base
+if __package__:
+    from .user_data import Role, User, Base
+else:
+    from user_data import Role, User, Base
 
 app = Flask(__name__)
 
@@ -18,7 +22,7 @@ if path.exists(DATABASE_FILE):
     db_exists = True
     print("\t database already exists")
 
-engine = create_engine('sqlite:///%s'%(DATABASE_FILE), echo=False)
+engine = create_engine(os.environ.get("USER_DATABASE_URL", 'sqlite:///%s'%(DATABASE_FILE)), echo=False)
 
 @event.listens_for(engine, "connect")
 def enable_foreign_keys(connection, _):
@@ -195,13 +199,15 @@ class CsvUserConflictError(ValueError):
 # CSV user saving
 def save_csv_users(reader, session):
     count = 0
-    seen_ids = set()
+    original_users = {}
     for line_number, row in get_csv_user_rows(reader):
         user_id = validate_user_id(row.get("id", ""))
-        if user_id in seen_ids:
+        if user_id not in original_users:
+            original_users[user_id] = session.get(User, user_id)
+        elif original_users[user_id] is None:
+            # For users first created by this upload, keep the first occurrence.
             continue
-        seen_ids.add(user_id)
-        existing_user = session.get(User, user_id)
+        existing_user = original_users[user_id]
         if existing_user is not None:
             if (
                 existing_user.name != (row.get("name") or "").strip()
@@ -213,7 +219,7 @@ def save_csv_users(reader, session):
         create_user(row, session)
         count += 1
 
-    if not seen_ids:
+    if not original_users:
         raise ValueError("empty_csv")
 
     return count
@@ -233,7 +239,7 @@ def import_users_from_csv(upload):
     except csv.Error as error:
         raise ValueError("invalid_csv") from error
     except IntegrityError as error:
-        raise ValueError("duplicate_csv_id") from error
+        raise ValueError("csv_integrity_error") from error
 
 
 def get_error_message(reason, **details):
@@ -250,7 +256,7 @@ def get_error_message(reason, **details):
         "invalid_csv_headers": "CSV must contain unique id, name, password and role columns.",
         "invalid_csv_row": "Invalid number of CSV fields.",
         "empty_csv": "CSV file contains no users.",
-        "duplicate_csv_id": "Duplicate user identifier. No users were imported.",
+        "csv_integrity_error": "Could not save the CSV import. No users were imported.",
         "conflicting_csv_user": (
             "User identifier {user_id} conflicts with existing user data on CSV line "
             "{line_number}. No users were imported."

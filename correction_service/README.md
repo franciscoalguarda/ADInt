@@ -75,6 +75,8 @@ As rotas normais das listagens não apresentam mensagens de sucesso.
   como PDF e PNG, com os QR codes detetados cobertos a cinzento.
   Antes de ocultar os códigos, normaliza-se a rotação das páginas sem alterar
   a sua aparência, para que a cobertura também funcione em páginas rodadas.
+  A deteção combina a página completa com regiões sobrepostas e deteção de
+  códigos individuais, incluindo códigos repetidos que a análise global pode omitir.
 - A nota deve ser finita e não negativa, sem máximo definido. O comentário é
   opcional. Guardar uma nota, incluindo zero, marca a resposta como corrigida.
   Não se calcula a nota final do exame.
@@ -88,7 +90,7 @@ intervalo e registos inexistentes devolvem 404.
 
 | Ficheiro | Conteúdo |
 | --- | --- |
-| `cs_app.py` | Configuração, rotas, validação e processamento dos PDFs, incluindo `split_pdf_into_pages()` e `cover_qr_codes_with_gray_squares()`, integradas sem alterações a partir do exemplo fornecido. |
+| `cs_app.py` | Configuração, rotas, validação e processamento dos PDFs. `split_pdf_into_pages()` mantém o exemplo fornecido; `cover_qr_codes_with_gray_squares()` reforça a deteção com regiões sobrepostas e códigos individuais. |
 | `correction_data.py` | Modelos `ProfessorAssignment`, `ExamCorrectionPdf` e `QuestionCorrection`: atribuições, PDFs originais, páginas e correções. |
 | `templates/` | Formulários, listagens e visualização das respostas. |
 
@@ -97,3 +99,7 @@ Por omissão, usa-se o SQLite na pasta do serviço.
 
 As novas bases incluem restrições de unicidade para os pares exame/questão e
 exame/professor.
+
+Os testes usam bases temporárias e inicializam o módulo com uma base em memória,
+sem criar nem modificar `correction_service/corrections.sqlite`. Incluem códigos
+QR repetidos do Printing Service e verificam cada canto das páginas PDF e PNG.

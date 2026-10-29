@@ -139,7 +139,9 @@ Modelos SQLAlchemy em `correction_service/correction_data.py`:
 
 ## Testes
 
-Os testes usam bases de dados e diretórios temporários:
+Os testes usam bases de dados e diretórios temporários.
+As instâncias criadas ao importar os módulos de teste usam bases em memória,
+sem criar ou alterar os ficheiros SQLite normais dos serviços.
 
 ```powershell
 .\venv\Scripts\python.exe -m unittest discover -s user_service -p "test*.py" -v
