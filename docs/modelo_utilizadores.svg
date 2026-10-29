@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="810" height="218" viewBox="0 0 810 218">
+  <rect width="810" height="218" fill="#f3f6fa"/>
+  <g fill="#ffffff" stroke="#b7c8d8" stroke-width="1.5">
+    <rect x="10" y="26" width="220" height="145" rx="6"/>
+    <rect x="295" y="26" width="220" height="145" rx="6"/>
+    <rect x="580" y="26" width="220" height="145" rx="6"/>
+  </g>
+  <g fill="#17324d">
+    <rect x="10" y="26" width="220" height="35" rx="6"/>
+    <rect x="295" y="26" width="220" height="35" rx="6"/>
+    <rect x="580" y="26" width="220" height="35" rx="6"/>
+  </g>
+  <g font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#ffffff">
+    <text x="120" y="49">User / users</text>
+    <text x="405" y="49">UserRoles / user_roles</text>
+    <text x="690" y="49">Role / roles</text>
+  </g>
+  <g font-family="sans-serif" font-size="13" fill="#263445">
+    <text x="25" y="88">id: chave primária</text>
+    <text x="25" y="111">name: nome da conta</text>
+    <text x="25" y="134">password: hash</text>
+    <text x="310" y="88">user_id: PK e FK de users.id</text>
+    <text x="310" y="111">role_id: PK e FK de roles.id</text>
+    <text x="310" y="145">Chave primária composta</text>
+    <text x="595" y="88">id: chave primária</text>
+    <text x="595" y="111">name: obrigatório e único</text>
+  </g>
+  <g stroke="#176b91" stroke-width="2">
+    <path d="M230 100 H295 M515 100 H580"/>
+  </g>
+  <g font-family="sans-serif" font-size="15" font-weight="bold" fill="#176b91" text-anchor="middle">
+    <text x="244" y="90">1</text>
+    <text x="281" y="90">N</text>
+    <text x="529" y="90">N</text>
+    <text x="566" y="90">1</text>
+  </g>
+  <text x="405" y="200" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#546779">Relação lógica User–Role: muitos-para-muitos, representada por duas relações um-para-muitos</text>
+</svg>

@@ -7,14 +7,8 @@ from pathlib import Path
 import pymupdf
 import qrcode
 from flask_xmlrpcre import Fault, XMLRPCHandler
-from flask import (
-    Flask,
-    abort,
-    redirect,
-    render_template,
-    send_file,
-    url_for,
-)
+from flask import Flask, abort, redirect, render_template, send_file, url_for
+
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from werkzeug.serving import make_server
