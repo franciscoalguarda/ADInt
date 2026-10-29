@@ -36,6 +36,10 @@ class UserServiceTests(unittest.TestCase):
         self.engine.dispose()
         self.temp_dir.cleanup()
 
+    '''
+        Verify that all user pages load without a secret key
+        or initial success and error messages.
+    '''
     def test_user_pages_are_available(self):
         self.assertIsNone(user_service.app.secret_key)
         for route in ("/", "/list_users", "/users/add", "/users/bulk-add"):
@@ -46,11 +50,18 @@ class UserServiceTests(unittest.TestCase):
                 self.assertNotIn(b'class="message success"', response.data)
                 self.assertNotIn("Set-Cookie", response.headers)
 
+    '''
+        Verify that two connections from the service engine both enforce SQLite foreign keys.
+    '''
     def test_foreign_keys_are_enabled_on_every_service_connection(self):
         with user_service.engine.connect() as first, user_service.engine.connect() as second:
             for connection in (first, second):
                 self.assertEqual(connection.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)
 
+    '''
+        Verify that foreign keys reject associations with missing users or roles
+        and direct deletion of referenced records, preserving the valid association.
+    '''
     def test_database_rejects_orphaned_user_role_associations(self):
         with self.session_factory.begin() as session:
             user_service.create_user({
@@ -77,6 +88,10 @@ class UserServiceTests(unittest.TestCase):
             self.assertEqual([role.name for role in user.roles], ["Student"])
             self.assertEqual(len(session.execute(select(associations)).all()), 1)
 
+    '''
+        Verify that unavailable roles prevent any user or role association from
+        being saved, preserve non-password form fields, and allow creation once restored.
+    '''
     def test_missing_database_role_prevents_user_creation_and_preserves_form(self):
         with self.session_factory.begin() as session:
             session.delete(session.scalar(select(user_service.Role).where(
@@ -108,6 +123,10 @@ class UserServiceTests(unittest.TestCase):
             self.assertEqual({role.name for role in session.get(user_service.User, 77003).roles},
                              {"Student", "Professor"})
 
+    '''
+        Verify that a missing role rolls back every new user in a CSV import
+        while preserving users and role associations that already existed.
+    '''
     def test_missing_database_role_rolls_back_the_entire_csv_import(self):
         with self.session_factory.begin() as session:
             session.delete(session.scalar(select(user_service.Role).where(
@@ -132,6 +151,10 @@ class UserServiceTests(unittest.TestCase):
             self.assertEqual(session.scalars(select(user_service.User.id)).all(), [78000])
             self.assertEqual([role.name for role in session.get(user_service.User, 78000).roles], ["Student"])
 
+    '''
+        Verify empty and populated dashboard counts, counting each user once
+        overall and once per assigned role, with navigation links and no exposed password.
+    '''
     def test_home_counts_users_once_and_includes_each_assigned_role(self):
         empty = self.client.get("/")
         self.assertIn(b'id="total-users">0</dd>', empty.data)
@@ -161,6 +184,10 @@ class UserServiceTests(unittest.TestCase):
         self.assertIn(b'href="/users/bulk-add"', response.data)
         self.assertNotIn(b"first-password", response.data)
 
+    '''
+        Verify that adding a user stores a verifiable password hash and displays
+        the user and role on a refreshable confirmation page.
+    '''
     def test_add_user_hashes_password_and_lists_role(self):
         response = self.client.post(
             "/users/add",
@@ -192,6 +219,10 @@ class UserServiceTests(unittest.TestCase):
             self.assertNotEqual(user.password, "temporary-password")
             self.assertTrue(check_password_hash(user.password, "temporary-password"))
 
+    '''
+        Verify that multiple roles are saved and a duplicate user ID preserves
+        the error form and selected roles without redisplaying the password.
+    '''
     def test_add_user_accepts_multiple_roles_and_rejects_duplicate_id(self):
         form = {
             "id": "71002",
@@ -229,6 +260,10 @@ class UserServiceTests(unittest.TestCase):
             )
             self.assertIsNone(session.get(user_service.User, 71003))
 
+    '''
+        Verify that CSV import confirms the imported count, lists both users,
+        and saves pipe-separated roles with a verifiable password hash.
+    '''
     def test_bulk_add_imports_csv_users_and_multiple_roles(self):
         csv_contents = (
             "id,name,password,role\n"
@@ -263,10 +298,16 @@ class UserServiceTests(unittest.TestCase):
                 check_password_hash(user.password, "professor-password")
             )
 
+    '''
+        Verify that an invalid role in a later CSV row rejects the whole batch,
+        including earlier valid users and skipped duplicate rows, and displays
+        the error on the upload form.
+    '''
     def test_bulk_add_rejects_invalid_batch_atomically(self):
         csv_contents = (
             "id,name,password,role\n"
             "73001,Valid First,first-password,Student\n"
+            "73001,Repeated First,another-password,Professor\n"
             "73002,Invalid Second,second-password,Not a role\n"
         )
         response = self.client.post(
@@ -286,11 +327,17 @@ class UserServiceTests(unittest.TestCase):
             self.assertIsNone(session.get(user_service.User, 73001))
             self.assertIsNone(session.get(user_service.User, 73002))
 
-    def test_bulk_add_rejects_duplicate_ids_and_empty_files(self):
+    '''
+        Verify that repeated CSV IDs, including equivalent numeric forms, are
+        imported once with the first occurrence's name, password, and roles.
+    '''
+    def test_bulk_add_skips_duplicate_ids_and_keeps_first_occurrence(self):
         duplicate_csv = (
             "id,name,password,role\n"
             "74001,First User,first-password,Student\n"
-            "74001,Second User,second-password,Student\n"
+            "074001,Second User,second-password,Administrator|Professor\n"
+            "74001,,,Unknown\n"
+            "74002,New User,new-password,Professor\n"
         )
         response = self.client.post(
             "/users/bulk-add",
@@ -301,20 +348,156 @@ class UserServiceTests(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.request.path, "/users/bulk-add")
-        self.assertNotIn("Location", response.headers)
-        self.assertIn(b"User identifier already exists.", response.data)
+        self.assertEqual(response.history[0].status_code, 302)
+        self.assertEqual(response.request.path, "/list_users/sucess")
+        self.assertEqual(response.request.args.get("count"), "2")
+        self.assertIn(b"2 users imported successfully.", response.data)
         with self.session_factory() as session:
-            self.assertIsNone(session.get(user_service.User, 74001))
+            self.assertEqual(session.scalars(select(user_service.User.id).order_by(user_service.User.id)).all(),
+                             [74001, 74002])
+            user = session.get(user_service.User, 74001)
+            self.assertEqual(user.name, "First User")
+            self.assertTrue(check_password_hash(user.password, "first-password"))
+            self.assertFalse(check_password_hash(user.password, "second-password"))
+            self.assertEqual([role.name for role in user.roles], ["Student"])
 
-        response = self.client.post(
-            "/users/bulk-add",
-            data={"file": (io.BytesIO(b"id,name,password,role\n"), "empty.csv")},
-            content_type="multipart/form-data",
-            follow_redirects=True,
+    '''
+        Verify that matching existing users are skipped, ignoring surrounding
+        whitespace and role order, while new users are imported and stored data is preserved.
+    '''
+    def test_bulk_add_skips_existing_users_and_preserves_their_data(self):
+        with self.session_factory.begin() as session:
+            existing = user_service.create_user({
+                "id": "74001", "name": "Existing User", "password": "original-password",
+                "role": "Student|Professor",
+            }, session)
+            original_hash = existing.password
+        contents = (
+            "id,name,password,role\n"
+            "74002,New First,first-password,Student\n"
+            "74001, Existing User ,original-password, Professor|Student|Professor \n"
+            "074001,Existing User,original-password,Student|Professor\n"
+            "74003,New Last,last-password,Professor\n"
         )
-        self.assertIn(b"contains no users", response.data)
+        response = self.client.post("/users/bulk-add", data={
+            "file": (io.BytesIO(contents.encode()), "users.csv"),
+        }, content_type="multipart/form-data", follow_redirects=True)
 
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request.path, "/list_users/sucess")
+        self.assertEqual(response.request.args.get("count"), "2")
+        self.assertIn(b"2 users imported successfully.", response.data)
+        with self.session_factory() as session:
+            self.assertEqual(session.scalars(select(user_service.User.id).order_by(user_service.User.id)).all(),
+                             [74001, 74002, 74003])
+            existing = session.get(user_service.User, 74001)
+            self.assertEqual(existing.name, "Existing User")
+            self.assertEqual(existing.password, original_hash)
+            self.assertEqual({role.name for role in existing.roles}, {"Student", "Professor"})
+
+    '''
+        Verify that name, role, or password conflicts with an earlier CSV reject
+        the entire later import, report the conflicting ID and line without exposing
+        passwords, and preserve existing users and role associations.
+    '''
+    def test_bulk_add_conflicts_with_an_earlier_csv_reject_the_entire_batch(self):
+        first_csv = (
+            "id,name,password,role\n"
+            "10,Henrique Matias,original-secret,Student|Professor\n"
+        )
+        response = self.client.post("/users/bulk-add", data={
+            "file": (io.BytesIO(first_csv.encode()), "first.csv"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 302)
+        with self.session_factory() as session:
+            original_hash = session.get(user_service.User, 10).password
+
+        cases = (
+            ("name", "Leonardo", "original-secret", "Student|Professor"),
+            ("roles", "Henrique Matias", "original-secret", "Administrator"),
+            ("password", "Henrique Matias", "replacement-secret", "Student|Professor"),
+        )
+        for field, name, password, roles in cases:
+            with self.subTest(field=field):
+                second_csv = (
+                    "id,name,password,role\n"
+                    "20,New Before,new-before-secret,Student\n"
+                    f"010,{name},{password},{roles}\n"
+                    "30,New After,new-after-secret,Professor\n"
+                )
+                response = self.client.post("/users/bulk-add", data={
+                    "file": (io.BytesIO(second_csv.encode()), "second.csv"),
+                }, content_type="multipart/form-data")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("Location", response.headers)
+                self.assertIn(
+                    b"User identifier 10 conflicts with existing user data on CSV line 3. "
+                    b"No users were imported.", response.data,
+                )
+                self.assertNotIn(b'class="message success"', response.data)
+                self.assertNotIn(b"original-secret", response.data)
+                self.assertNotIn(b"replacement-secret", response.data)
+                self.assertNotIn(b"new-before-secret", response.data)
+                with self.session_factory() as session:
+                    self.assertEqual(session.scalars(select(user_service.User.id)).all(), [10])
+                    existing = session.get(user_service.User, 10)
+                    self.assertEqual(existing.name, "Henrique Matias")
+                    self.assertEqual(existing.password, original_hash)
+                    self.assertEqual({role.name for role in existing.roles}, {"Student", "Professor"})
+                    associations = user_service.Base.metadata.tables["user_roles"]
+                    self.assertEqual(len(session.execute(select(associations)).all()), 2)
+
+    '''
+        Verify that importing the same users again adds no records, preserves
+        existing data, and shows a repeatable zero-import confirmation.
+    '''
+    def test_bulk_add_only_existing_users_reports_no_new_imports(self):
+        contents = b"id,name,password,role\n74001,First User,first-password,Student\n"
+        for expected_count in ("1", "0"):
+            response = self.client.post("/users/bulk-add", data={
+                "file": (io.BytesIO(contents), "users.csv"),
+            }, content_type="multipart/form-data", follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.history[0].status_code, 302)
+            self.assertEqual(response.request.path, "/list_users/sucess")
+            self.assertEqual(response.request.args.get("count"), expected_count)
+            self.assertNotIn("Set-Cookie", response.history[0].headers)
+            self.assertNotIn("Set-Cookie", response.headers)
+            with self.session_factory() as session:
+                user = session.get(user_service.User, 74001)
+                current = (user.name, user.password, {role.name for role in user.roles})
+                self.assertEqual(session.scalars(select(user_service.User.id)).all(), [74001])
+            if expected_count == "1":
+                original = current
+            else:
+                self.assertEqual(current, original)
+        self.assertIn(b"No new users were imported.", response.data)
+        self.assertNotIn(b"User added successfully.", response.data)
+        self.assertNotIn(b'class="message error"', response.data)
+        refreshed = self.client.get(response.request.full_path)
+        self.assertIn(b"No new users were imported.", refreshed.data)
+
+    '''
+        Verify that files without user rows remain invalid, rather than being
+        mistaken for valid imports containing only existing users.
+    '''
+    def test_bulk_add_rejects_files_without_users(self):
+        for contents in (b"id,name,password,role\n", b"id,name,password,role\n\n,,,\n"):
+            with self.subTest(contents=contents):
+                response = self.client.post("/users/bulk-add", data={
+                    "file": (io.BytesIO(contents), "empty.csv"),
+                }, content_type="multipart/form-data")
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("Location", response.headers)
+                self.assertIn(b"contains no users", response.data)
+                with self.session_factory() as session:
+                    self.assertIsNone(session.scalar(select(user_service.User.id)))
+
+    '''
+        Verify that the confirmation URL displays success while the normal user
+        listing displays neither success nor error feedback.
+    '''
     def test_success_route_displays_confirmation(self):
         success = self.client.get("/list_users/sucess")
         self.assertEqual(success.status_code, 200)
@@ -323,6 +506,10 @@ class UserServiceTests(unittest.TestCase):
         self.assertNotIn(b'class="message success"', listing.data)
         self.assertNotIn(b'class="message error"', listing.data)
 
+    '''
+        Verify that invalid IDs, missing details, and invalid or missing roles
+        display specific form errors without redirects or password disclosure.
+    '''
     def test_add_user_renders_form_with_validation_messages(self):
         form = {
             "id": "75001", "name": "Test User", "password": "test-password",
@@ -346,6 +533,10 @@ class UserServiceTests(unittest.TestCase):
                 self.assertIn(b'<form method="post"', response.data)
                 self.assertNotIn(b"test-password", response.data)
 
+    '''
+        Verify that a CSV with invalid UTF-8 bytes displays an error on the
+        upload form without redirecting.
+    '''
     def test_bulk_add_renders_form_with_invalid_csv_message(self):
         response = self.client.post(
             "/users/bulk-add",
@@ -360,8 +551,12 @@ class UserServiceTests(unittest.TestCase):
         self.assertIn(b'enctype="multipart/form-data"', response.data)
         self.assertIn(b"Invalid CSV file.", response.data)
 
+    '''
+        Verify that malformed, empty, and negative counts do not display
+        a successful bulk-import message.
+    '''
     def test_success_route_handles_invalid_import_counts(self):
-        for count in ("invalid", "", "0", "-1"):
+        for count in ("invalid", "", "-1"):
             with self.subTest(count=count):
                 response = self.client.get(
                     "/list_users/sucess", query_string={"count": count}

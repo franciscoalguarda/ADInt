@@ -69,6 +69,10 @@ class CorrectionServiceTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 302)
 
+    '''
+        Verify that all main correction pages load without a secret key
+        or initial error and success paragraphs.
+    '''
     def test_required_pages_load(self):
         self.assertIsNone(self.app.secret_key)
         for path in (
@@ -86,6 +90,10 @@ class CorrectionServiceTests(unittest.TestCase):
                 self.assertNotIn(b'<p class="error"', response.data)
                 self.assertNotIn(b'<p class="success"', response.data)
 
+    '''
+        Verify that an empty dashboard shows zero counts and progress, an empty
+        state, and links to every correction action.
+    '''
     def test_home_handles_empty_data_and_links_to_correction_actions(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
@@ -97,6 +105,10 @@ class CorrectionServiceTests(unittest.TestCase):
         for path in ("/assignments", "/scans/upload", "/answers", "/answers/corrected", "/scans"):
             self.assertIn(f'href="{path}"'.encode(), response.data)
 
+    '''
+        Verify that a zero grade counts as a completed correction and dashboard
+        counts and progress advance from 25 percent to full completion.
+    '''
     def test_home_progress_updates_for_zero_grade_and_completed_corrections(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         for question_number in range(1, 5):
@@ -129,6 +141,10 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertIn(b'<progress value="4" max="4"', response.data)
         self.assertIn(b"All available answers have been corrected.", response.data)
 
+    '''
+        Verify that a valid professor assignment is saved with confirmation,
+        while a question outside 1-4 preserves the form and adds no assignment.
+    '''
     def test_assignment_is_saved_and_question_range_is_validated(self):
         response = self.client.post(
             "/assignments",
@@ -168,6 +184,10 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertEqual(len(assignments), 1)
             self.assertEqual(assignments[0].question_number, 2)
 
+    '''
+        Verify that assigning a professor to a second question in the same exam
+        rejects both new and replacement assignments and preserves existing data.
+    '''
     def test_professor_cannot_be_assigned_to_another_question_in_the_same_exam(self):
         self.assign_professor(question_number=1)
         self.assign_professor(question_number=2)
@@ -190,12 +210,19 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertEqual([(row.question_number, row.professor_id) for row in assignments],
                              [(1, 82001), (2, 82002)])
 
+    '''
+        Verify that a professor may be assigned to questions in different exams.
+    '''
     def test_same_professor_can_be_assigned_in_different_exams(self):
         self.assign_professor(question_number=1, professor_id=82001)
         self.assign_professor(question_number=2, exam_id=81002, professor_id=82001)
         with self.session_factory() as session:
             self.assertEqual(len(session.scalars(select(ProfessorAssignment)).all()), 2)
 
+    '''
+        Verify that repeating an assignment reports that it already exists and
+        preserves its ID and any correction, including zero and positive grades.
+    '''
     def test_repeated_assignment_shows_message_without_changing_data(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         self.assign_professor()
@@ -229,6 +256,10 @@ class CorrectionServiceTests(unittest.TestCase):
                     self.assertEqual(answer.grade, None if grade is None else float(grade))
                     self.assertEqual(answer.comment, comment)
 
+    '''
+        Verify that reassignment before grading updates every answer for the
+        exam question and frees the former professor for another question.
+    '''
     def test_professor_can_be_changed_before_any_answer_is_corrected(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(8)).status_code, 302)
         self.assign_professor(professor_id=82001)
@@ -243,6 +274,11 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertIn(b"Professor: 82005.", self.client.get("/answers/1/correct").data)
         self.assertIn(b"Professor: 82005.", self.client.get("/answers/5/correct").data)
 
+    '''
+        Verify that any corrected answer, including a zero grade in another
+        scan, blocks reassignment for that exam question while unrelated
+        questions and exams remain assignable.
+    '''
     def test_corrected_answer_locks_professor_for_the_entire_exam_question(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(8)).status_code, 302)
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
@@ -276,6 +312,10 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assign_professor(question_number=3, professor_id=82013)
         self.assign_professor(question_number=1, exam_id=81002, professor_id=82001)
 
+    '''
+        Verify that the database rejects a professor assigned to two questions
+        in the same exam while accepting a different professor for the second question.
+    '''
     def test_database_rejects_duplicate_professor_assignments(self):
         self.assign_professor()
         with self.assertRaises(IntegrityError):
@@ -283,6 +323,10 @@ class CorrectionServiceTests(unittest.TestCase):
                 session.add(ProfessorAssignment(exam_id=81001, question_number=2, professor_id=82001))
         self.assign_professor(question_number=2, professor_id=82002)
 
+    '''
+        Verify that reassignment waits for a concurrent grading transaction,
+        then rejects the change once the grade commits, preserving the original professor.
+    '''
     def test_grading_and_professor_reassignment_cannot_bypass_each_other(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         self.assign_professor()
@@ -336,6 +380,11 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertEqual(session.scalar(select(ProfessorAssignment)).professor_id, 82001)
             self.assertEqual(session.get(QuestionCorrection, 1).grade, 10)
 
+    '''
+        Verify that legacy assignments remain unchanged at startup while route
+        validation prevents new professor conflicts, allows repairs, and locks
+        reassignment after a zero-grade correction.
+    '''
     def test_legacy_database_is_validated_without_rewriting_its_assignments(self):
         database_path = Path(self.temp_dir.name) / "legacy.sqlite"
         with closing(sqlite3.connect(database_path)) as connection:
@@ -379,6 +428,11 @@ class CorrectionServiceTests(unittest.TestCase):
         finally:
             legacy_app.extensions["correction_engine"].dispose()
 
+    '''
+        Verify that uploading four pages saves the source and questions 1-4,
+        confirms the page count and serves answer PDFs, PNGs,
+        and the original scan.
+    '''
     def test_four_page_scan_is_saved_and_pages_are_available(self):
         response = self.upload_pdf(self.make_pdf(4))
         self.assertEqual(response.status_code, 302)
@@ -416,6 +470,11 @@ class CorrectionServiceTests(unittest.TestCase):
             self.client.get("/scans/1/original.pdf").status_code, 200
         )
 
+    '''
+        Verify that processing pages rotated by 0, 90, 180, and 270 degrees
+        makes all four corner QR codes undetectable in both PDF and PNG outputs,
+        preserves central answer pixels, and retains the original scan bytes.
+    '''
     def test_rotated_scan_masks_qr_codes_and_preserves_original(self):
         detector = cv2.QRCodeDetector()
         rotations = (0, 90, 180, 270)
@@ -471,6 +530,11 @@ class CorrectionServiceTests(unittest.TestCase):
                         original_image[height // 3:height * 2 // 3, width // 3:width * 2 // 3],
                     )
 
+    '''
+        Verify that a five-page scan yields four answers after its introductory
+        page is skipped, while a three-page upload reports an error without
+        adding any source or answer records.
+    '''
     def test_scan_with_intro_page_is_supported_and_invalid_scan_is_atomic(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(5)).status_code, 302)
         with self.session_factory() as session:
@@ -501,6 +565,10 @@ class CorrectionServiceTests(unittest.TestCase):
                 4,
             )
 
+    '''
+        Verify that NaN preserves the form and leaves the answer ungraded,
+        while zero saves the grade and comment and displays a confirmation.
+    '''
     def test_grade_validation_and_zero_grade_correction(self):
         self.upload_pdf(self.make_pdf(4))
         self.assign_professor()
@@ -544,6 +612,11 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertEqual(answer.grade, 0)
             self.assertEqual(answer.comment, "No points")
 
+    '''
+        Verify that unassigned answers reject correction GET and POST requests
+        with 409 while their PDF and PNG stay accessible, and that assigning
+        a professor enables correction links, the form, and grade persistence.
+    '''
     def test_unassigned_answer_is_blocked_until_a_professor_is_assigned(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         path = "/answers/1/correct"
@@ -583,6 +656,10 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertTrue(answer.evaluated)
             self.assertEqual(answer.grade, 10)
 
+    '''
+        Verify that assignments for another exam or question do not enable
+        correction, while an exact exam/question match enables viewing and grading.
+    '''
     def test_assignment_must_match_both_exam_and_question(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         self.assign_professor(question_number=2)
@@ -599,6 +676,10 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/answers/2/correct").status_code, 200)
         self.assertEqual(self.client.post("/answers/2/correct", data={"grade": "10"}).status_code, 302)
 
+    '''
+        Verify that removing an assignment blocks viewing the grading form and
+        submitting edits with 409 while preserving the existing grade and comment.
+    '''
     def test_removed_assignment_prevents_editing_an_existing_correction(self):
         self.assertEqual(self.upload_pdf(self.make_pdf(4)).status_code, 302)
         self.assign_professor()
@@ -622,6 +703,10 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertEqual(answer.grade, 10)
             self.assertEqual(answer.comment, "Original correction")
 
+    '''
+        Verify that invalid exam, professor, and question identifiers display
+        specific errors on the form without redirects or saved assignments.
+    '''
     def test_assignment_validation_errors_preserve_the_form(self):
         form = {"exam_id": "81001", "professor_id": "82001", "question_number": "2"}
         cases = (
@@ -640,6 +725,10 @@ class CorrectionServiceTests(unittest.TestCase):
         with self.session_factory() as session:
             self.assertIsNone(session.scalar(select(ProfessorAssignment.id)))
 
+    '''
+        Verify that an assignment integrity conflict displays the predefined
+        retry message and submitted professor ID.
+    '''
     def test_assignment_database_conflict_is_rendered_without_a_session(self):
         conflict = IntegrityError("INSERT", {}, RuntimeError("conflict"))
         with patch.object(self.session_factory, "begin", side_effect=conflict):
@@ -651,6 +740,11 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertIn(b'value="82001"', response.data)
         self.assertNotIn("Set-Cookie", response.headers)
 
+    '''
+        Verify that missing, non-PDF, empty, unreadable, and failed-processing
+        uploads display predefined errors, preserve the exam ID, hide internal
+        exception details, and save no source records.
+    '''
     def test_upload_errors_use_predefined_messages_without_saving(self):
         cases = (
             (b"not a PDF", "scan.txt", b"Only PDF files are accepted."),
@@ -677,6 +771,10 @@ class CorrectionServiceTests(unittest.TestCase):
         with self.session_factory() as session:
             self.assertIsNone(session.scalar(select(ExamCorrectionPdf.id)))
 
+    '''
+        Verify that confirmation URLs repeatedly display success and
+        invalid upload counts fall back to a generic confirmation.
+    '''
     def test_success_routes_are_repeatable_and_normal_lists_have_no_message(self):
         cases = (
             ("/assignments/success", b"Professor assignment saved successfully."),
@@ -696,11 +794,18 @@ class CorrectionServiceTests(unittest.TestCase):
             self.assertIn(b"PDF uploaded successfully.", response.data)
             self.assertNotIn(b"page(s) ready for correction.", response.data)
 
+    '''
+        Verify that missing answers, processed PDFs, and original scans return 404.
+    '''
     def test_missing_records_return_not_found(self):
         self.assertEqual(self.client.get("/answers/999/correct").status_code, 404)
         self.assertEqual(self.client.get("/answers/999/page.pdf").status_code, 404)
         self.assertEqual(self.client.get("/scans/999/original.pdf").status_code, 404)
 
+    '''
+        Verify that zero and IDs above the signed 64-bit limit return 404 for
+        correction GET and POST requests, answer files, and original scans.
+    '''
     def test_out_of_range_record_ids_return_not_found(self):
         for identifier in (0, 2**63, 10**30):
             for path in (
@@ -715,6 +820,10 @@ class CorrectionServiceTests(unittest.TestCase):
                 response = self.client.post(f"/answers/{identifier}/correct", data={"grade": "10"})
                 self.assertEqual(response.status_code, 404)
 
+    '''
+        Verify that the largest signed 64-bit record ID supports correction
+        viewing and saving, answer PDF and PNG access, and original scan downloads.
+    '''
     def test_largest_sqlite_record_id_remains_accessible(self):
         identifier = 2**63 - 1
         pdf = self.make_pdf(1)

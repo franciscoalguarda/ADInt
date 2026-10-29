@@ -84,6 +84,12 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
             exam = session.get(PrintedExam, 1)
             return exam.pdf_file, {sheet.student_id: sheet.id for sheet in exam.sheets}
 
+    '''
+        Verify through real XML-RPC serialization that enrollment alone leaves
+        the PDF unchanged, repeated orders reuse it, and a later explicit order
+        adds students while preserving existing QR IDs and rendered pages.
+        Repeated CSV IDs and existing enrollments must not add extra sheets.
+    '''
     def test_new_students_update_pdf_only_after_another_printing_order(self):
         self.assertEqual(self.enroll([10, 20]).status_code, 302)
         self.assertEqual(self.proxy.calls, [])
@@ -96,7 +102,12 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.post("/exams/1/order-printing").status_code, 302)
         self.assertEqual(self.snapshot(), (original_pdf, original_ids))
         calls = len(self.proxy.calls)
-        self.assertEqual(self.enroll([30, 40]).status_code, 302)
+        enrollment = self.enroll([10, 30, 30, 20, 40])
+        self.assertEqual(enrollment.status_code, 302)
+        self.assertEqual(enrollment.headers["Location"], "/enrollments/success?count=2")
+        repeated = self.enroll([10, 20, 30, 40])
+        self.assertEqual(repeated.status_code, 302)
+        self.assertEqual(repeated.headers["Location"], "/enrollments/success?count=0")
         self.assertEqual(len(self.proxy.calls), calls)
         self.assertEqual(self.snapshot(), (original_pdf, original_ids))
         self.assertEqual((self.root / "output" / "exam_1.pdf").read_bytes(), original_pdf)
@@ -115,6 +126,10 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
         self.assertEqual(self.printing_app.test_client().get("/exams/1/pdf").data, updated_pdf)
         self.assertEqual((self.root / "output" / "exam_1.pdf").read_bytes(), updated_pdf)
 
+    '''
+        Verify that enrollment succeeds while printing is offline without RPC
+        calls or warnings, and the next explicit order expands the PDF with stable IDs.
+    '''
     def test_enrollment_while_printing_is_offline_keeps_pdf_until_explicit_order(self):
         self.assertEqual(self.enroll([10, 20]).status_code, 302)
         self.client.post("/exams/1/order-printing")
@@ -135,6 +150,10 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
             self.assertEqual(document.page_count, 16)
         self.assertEqual({student: updated_ids[student] for student in original_ids}, original_ids)
 
+    '''
+        Verify that an externally created PDF survives an Admin restart and
+        later enrollment unchanged until an explicit order adds the new student's pages.
+    '''
     def test_pdf_created_outside_admin_requires_a_new_order_after_admin_restart(self):
         self.assertEqual(self.enroll([10, 20]).status_code, 302)
         self.proxy.print_exam("1", self.exam_date.isoformat(), "Algorithms", ["10", "20"])
@@ -155,6 +174,10 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
             self.assertEqual(document.page_count, 12)
         self.assertEqual({student: updated_ids[student] for student in original_ids}, original_ids)
 
+    '''
+        Verify that Admin blocks late enrollment and printing without RPC calls,
+        and direct XML-RPC also rejects late printing while preserving the PDF and IDs.
+    '''
     def test_past_exam_cannot_be_printed_by_admin_or_direct_xmlrpc(self):
         self.enroll([10, 20])
         self.client.post("/exams/1/order-printing")

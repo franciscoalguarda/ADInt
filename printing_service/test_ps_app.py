@@ -51,6 +51,11 @@ class PrintingServiceTests(unittest.TestCase):
         self.app.extensions["printing_engine"].dispose()
         self.temp_dir.cleanup()
 
+    '''
+        Verify that XML-RPC printing saves four question pages per student in
+        the database and output PDF, using a unique sheet ID per student and
+        four QR images on each page with the same ID across that student's pages.
+    '''
     def test_print_exam_creates_four_answer_pages_per_student(self):
         with patch("qrcode.make", wraps=qrcode.make) as qr_factory:
             result = self.proxy.print_exam(
@@ -94,6 +99,10 @@ class PrintingServiceTests(unittest.TestCase):
                     f"Expected four QR code images on page {page_number + 1}",
                 )
 
+    '''
+        Verify that the listing shows exam details and PDF actions, serves the
+        stored PDF inline, and returns 404 for missing exam view and save requests.
+    '''
     def test_web_page_lists_exams_and_serves_saved_pdf(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
 
@@ -115,6 +124,10 @@ class PrintingServiceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/exams/999/pdf").status_code, 404)
         self.assertEqual(self.client.post("/exams/999/pdf/save").status_code, 404)
 
+    '''
+        Verify that view and save URLs reject IDs outside the positive signed
+        64-bit range but serve and save the PDF for the largest valid ID.
+    '''
     def test_pdf_urls_reject_out_of_range_ids_and_accept_the_largest_id(self):
         for identifier in (0, -1, 2**63, 10**100):
             for method, suffix in (("GET", ""), ("POST", "/save")):
@@ -129,6 +142,11 @@ class PrintingServiceTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/exams/{exam_id}/pdf/save").status_code, 302)
         self.assertEqual((self.output_dir / f"exam_{exam_id}.pdf").read_bytes(), response.data)
 
+    '''
+        Verify that POST save recreates missing output and replaces an outdated
+        copy using stored PDF bytes without regenerating sheets or changing QR IDs.
+        The action redirects to confirmation and rejects GET.
+    '''
     def test_save_to_output_restores_the_latest_pdf_without_regenerating_sheets(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
@@ -157,6 +175,10 @@ class PrintingServiceTests(unittest.TestCase):
         self.assertEqual(output_path.read_bytes(), original_pdf)
         self.assertEqual(self.client.get("/exams/12/pdf/save").status_code, 405)
 
+    '''
+        Verify that an output replacement failure returns 500, logs an error,
+        preserves the stored and published PDF, and removes the temporary file.
+    '''
     def test_save_to_output_failure_preserves_the_pdf_and_reports_an_error(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
         original_pdf = self.client.get("/exams/12/pdf").data
@@ -170,6 +192,10 @@ class PrintingServiceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
         self.assertEqual(list(self.output_dir.glob("*.pdf")), [self.output_dir / "exam_12.pdf"])
 
+    '''
+        Verify that updating the course and exam date adds new students while
+        retaining existing sheets and their IDs in the regenerated PDF.
+    '''
     def test_printing_metadata_changes_preserve_existing_resolution_sheets(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
         session_factory = self.app.extensions["printing_session_factory"]
@@ -195,10 +221,17 @@ class PrintingServiceTests(unittest.TestCase):
             with pymupdf.open(stream=exam.pdf_file, filetype="pdf") as document:
                 self.assertEqual(document.page_count, 12)
 
+    '''
+        Verify that an impossible calendar date is rejected with an XML-RPC fault.
+    '''
     def test_invalid_exam_date_is_rejected(self):
         with self.assertRaises(Fault):
             self.proxy.print_exam(12, "2026-02-30", "Algorithms", [10])
 
+    '''
+        Verify that repeating an order with reversed student order preserves
+        every sheet ID and the exact database and output PDF bytes.
+    '''
     def test_repeated_order_preserves_qr_identifiers_and_pdf_bytes(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
         original_pdf = self.client.get("/exams/12/pdf").data
@@ -213,6 +246,10 @@ class PrintingServiceTests(unittest.TestCase):
             for identifier in original_ids.values():
                 self.assertIsNotNone(session.get(ResolutionSheet, identifier))
 
+    '''
+        Verify that two additional students expand the PDF from eight to sixteen
+        pages without changing existing IDs, and stale orders do not remove students.
+    '''
     def test_pdf_grows_from_eight_to_sixteen_pages_and_stale_orders_keep_all_students(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
         factory = self.app.extensions["printing_session_factory"]
@@ -230,6 +267,10 @@ class PrintingServiceTests(unittest.TestCase):
             self.assertEqual({student: ids[student] for student in original_ids}, original_ids)
             self.assertEqual(len(set(ids.values())), 4)
 
+    '''
+        Verify that printing is allowed on the exam date but later requests
+        are rejected, even with a future replacement date, preserving existing data.
+    '''
     def test_printing_is_allowed_today_and_rejected_after_the_exam_date(self):
         module_name = create_app.__module__
         with patch(f"{module_name}.date", wraps=date) as server_date:
@@ -246,6 +287,10 @@ class PrintingServiceTests(unittest.TestCase):
             self.assertIsNone(session.get(PrintedExam, 13))
             self.assertEqual([sheet.student_id for sheet in session.get(PrintedExam, 12).sheets], [10])
 
+    '''
+        Verify that failing to publish an expanded PDF raises an XML-RPC fault,
+        rolls back new sheets, preserves the old PDF and QR IDs, and cleans temporary files.
+    '''
     def test_failed_pdf_copy_keeps_previous_pdf_and_qr_identifiers(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
         original_pdf = self.client.get("/exams/12/pdf").data
@@ -261,6 +306,10 @@ class PrintingServiceTests(unittest.TestCase):
             self.assertEqual([(sheet.student_id, sheet.id) for sheet in session.get(PrintedExam, 12).sheets], [(10, identifier)])
         self.assertEqual(list(self.output_dir.glob("*.pdf")), [self.output_dir / "exam_12.pdf"])
 
+    '''
+        Verify that concurrent orders retain both newly added students and the
+        original sheet ID, publishing the same twelve-page PDF stored in the database.
+    '''
     def test_concurrent_orders_preserve_existing_students_and_publish_the_latest_pdf(self):
         self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
         with self.app.extensions["printing_session_factory"]() as session:
@@ -281,6 +330,10 @@ class PrintingServiceTests(unittest.TestCase):
         with pymupdf.open(stream=contents, filetype="pdf") as document:
             self.assertEqual(document.page_count, 12)
 
+    '''
+        Verify that decimal XML-RPC strings support exam and student IDs beyond
+        32 bits, including the signed 64-bit maximum, and produce an accessible PDF.
+    '''
     def test_decimal_strings_support_64bit_exam_and_student_identifiers(self):
         exam_id = 2**63 - 1
         student_ids = [2**31, 2**63 - 1]
@@ -296,6 +349,10 @@ class PrintingServiceTests(unittest.TestCase):
                 self.assertEqual(document.page_count, 8)
         self.assertEqual(self.client.get(f"/exams/{exam_id}/pdf").status_code, 200)
 
+    '''
+        Verify that invalid, nonpositive, oversized, boolean, and fractional exam
+        or student IDs raise XML-RPC faults without creating any exams.
+    '''
     def test_invalid_identifier_values_are_rejected(self):
         for identifier in ("0", "-1", "1.5", "abc", str(2**63), True, 1.5):
             with self.subTest(identifier=identifier, field="exam_id"):
@@ -307,12 +364,20 @@ class PrintingServiceTests(unittest.TestCase):
         with self.app.extensions["printing_session_factory"]() as session:
             self.assertIsNone(session.scalar(select(PrintedExam.id)))
 
+    '''
+        Verify that an integer ID and its zero-padded decimal string are treated
+        as duplicates and rejected without creating the exam.
+    '''
     def test_duplicate_ids_are_detected_after_normalizing_wire_types(self):
         with self.assertRaises(Fault):
             self.proxy.print_exam("12", self.exam_date.isoformat(), "Algorithms", [10, "010"])
         with self.app.extensions["printing_session_factory"]() as session:
             self.assertIsNone(session.get(PrintedExam, 12))
 
+    '''
+        Verify that duplicate student IDs raise an XML-RPC fault without
+        creating an exam record or an output PDF.
+    '''
     def test_duplicate_student_ids_are_rejected_without_creating_exam(self):
         with self.assertRaises(Fault):
             self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 10])
@@ -321,6 +386,9 @@ class PrintingServiceTests(unittest.TestCase):
         with self.app.extensions["printing_session_factory"]() as session:
             self.assertIsNone(session.get(PrintedExam, 12))
 
+    '''
+        Verify that the root URL still accepts XML-RPC printing requests.
+    '''
     def test_xmlrpc_root_path_remains_supported(self):
         root_proxy = ServerProxy(
             f"http://127.0.0.1:{self.server.server_address[1]}/"

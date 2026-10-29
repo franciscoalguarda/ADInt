@@ -58,8 +58,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Exam scheduled successfully", response.data)
         return 1
 
+    '''
+        Verify that scheduling an exam makes its course and date appear in the exam list.
+    '''
     def test_schedule_and_list_exam(self):
-        """A scheduled exam is persisted and appears in the exam list."""
         self.schedule_exam()
 
         response = self.client.get("/exams")
@@ -68,8 +70,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Algorithms", response.data)
         self.assertIn(self.exam_date.isoformat().encode(), response.data)
 
+    '''
+        Verify that a malformed exam date displays a validation message.
+    '''
     def test_rejects_invalid_exam_date(self):
-        """Invalid dates are reported instead of being stored."""
         response = self.client.post(
             "/exams/schedule",
             data={"course": "Algorithms", "date": "not-a-date"},
@@ -78,8 +82,11 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Enter a valid exam date", response.data)
 
+    '''
+        Verify that a valid CSV enrolls both students and shows their exam and
+        enrollment count on the confirmation page.
+    '''
     def test_bulk_enrollment_is_listed(self):
-        """Valid CSV rows become visible in the enrollment listing."""
         exam_id = self.schedule_exam()
         response = self.client.post(
             f"/exams/{exam_id}/enroll",
@@ -98,6 +105,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b">10<", response.data)
         self.assertIn(b">20<", response.data)
 
+    '''
+        Verify that scheduling in the past preserves the submitted form,
+        displays an error, and leaves the exam database empty.
+    '''
     def test_past_exam_date_is_rejected_without_saving(self):
         today = date(2030, 1, 15)
         past_date = (today - timedelta(days=1)).isoformat()
@@ -116,6 +127,9 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertIsNone(session.scalar(select(Exam.id)))
 
+    '''
+        Verify that today's date is accepted and persisted before redirecting to confirmation.
+    '''
     def test_exam_can_be_scheduled_for_today(self):
         today = date(2030, 1, 15)
         with patch("as_app.date", wraps=date) as server_date:
@@ -130,27 +144,37 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertEqual(session.get(Exam, 1).date, today)
 
-    def test_duplicate_ids_reject_entire_upload(self):
-        """Duplicate IDs within one CSV cause the whole upload to be rejected."""
+    '''
+        Verify that repeated student IDs, including equivalent numeric forms,
+        are imported once and the confirmation counts only unique students.
+    '''
+    def test_duplicate_csv_ids_are_imported_once(self):
         exam_id = self.schedule_exam()
         response = self.client.post(
             f"/exams/{exam_id}/enroll",
-            data={"file": (io.BytesIO(b"student_id\n10\n10\n"), "students.csv")},
+            data={"file": (io.BytesIO(b"student_id\n10\n010\n20\n20\n"), "students.csv")},
             content_type="multipart/form-data",
+            follow_redirects=True,
         )
 
-        self.assertIn(b"duplicate student IDs", response.data)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request.path, "/enrollments/success")
+        self.assertEqual(response.request.args.get("count"), "2")
+        self.assertIn(b"2 student(s) enrolled successfully.", response.data)
+        self.default_proxy.assert_not_called()
         session_factory = self.app.extensions["admin_session_factory"]
         with session_factory() as session:
-            count = session.scalar(
-                select(Exam.id).where(Exam.id == exam_id)
-            )
-            enrolled_count = session.scalar(
-                select(Enrollment.student_id).where(Enrollment.exam_id == exam_id)
-            )
-        self.assertEqual(count, exam_id)
-        self.assertIsNone(enrolled_count)
+            student_ids = session.scalars(
+                select(Enrollment.student_id)
+                .where(Enrollment.exam_id == exam_id)
+                .order_by(Enrollment.student_id)
+            ).all()
+        self.assertEqual(student_ids, [10, 20])
 
+    '''
+        Verify that rows with missing or extra fields report the offending line
+        and reject the entire enrollment upload, including earlier valid rows.
+    '''
     def test_invalid_csv_field_counts_reject_entire_upload(self):
         exam_id = self.schedule_exam()
         cases = (
@@ -176,6 +200,9 @@ class AdminServiceTests(unittest.TestCase):
                 with self.app.extensions["admin_session_factory"]() as session:
                     self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
+    '''
+        Verify that an unclosed quoted CSV field reports a format error and saves no students.
+    '''
     def test_unclosed_csv_quotes_are_reported_without_saving(self):
         exam_id = self.schedule_exam()
         response = self.client.post(
@@ -190,6 +217,10 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
+    '''
+        Verify that enrollment accepts the student_identifier alias, blank lines,
+        extra columns, and quoted commas while saving the correct student IDs.
+    '''
     def test_valid_csv_extra_columns_and_quoted_commas_are_supported(self):
         exam_id = self.schedule_exam()
         contents = b'student_identifier,note\n\n1001,"Surname, Name"\n1002,Other\n'
@@ -207,8 +238,11 @@ class AdminServiceTests(unittest.TestCase):
                 [1001, 1002],
             )
 
-    def test_existing_enrollment_rejects_upload_without_partial_changes(self):
-        """Existing enrollments reject a batch without inserting its other students."""
+    '''
+        Verify that existing enrollments and repeated CSV IDs are skipped while
+        new students are imported and only new enrollments are counted.
+    '''
+    def test_existing_enrollments_are_skipped_while_new_students_are_imported(self):
         exam_id = self.schedule_exam()
         self.client.post(
             f"/exams/{exam_id}/enroll",
@@ -217,11 +251,16 @@ class AdminServiceTests(unittest.TestCase):
         )
         response = self.client.post(
             f"/exams/{exam_id}/enroll",
-            data={"file": (io.BytesIO(b"student_id\n20\n10\n"), "students.csv")},
+            data={"file": (io.BytesIO(b"student_id\n20\n10\n20\n010\n"), "students.csv")},
             content_type="multipart/form-data",
+            follow_redirects=True,
         )
 
-        self.assertIn(b"Students already enrolled in this exam: 10", response.data)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request.path, "/enrollments/success")
+        self.assertEqual(response.request.args.get("count"), "1")
+        self.assertIn(b"1 student(s) enrolled successfully.", response.data)
+        self.default_proxy.assert_not_called()
         session_factory = self.app.extensions["admin_session_factory"]
         with session_factory() as session:
             student_ids = session.scalars(
@@ -229,10 +268,80 @@ class AdminServiceTests(unittest.TestCase):
                 .where(Enrollment.exam_id == exam_id)
                 .order_by(Enrollment.student_id)
             ).all()
-        self.assertEqual(student_ids, [10])
+        self.assertEqual(student_ids, [10, 20])
 
+    '''
+        Verify that uploading only existing students is a successful no-op with
+        a repeatable zero-enrollment message and no printing calls.
+    '''
+    def test_upload_with_only_existing_students_reports_no_new_enrollments(self):
+        exam_id = self.schedule_exam()
+        self.client.post(
+            f"/exams/{exam_id}/enroll",
+            data={"file": (io.BytesIO(b"student_id\n10\n20\n"), "students.csv")},
+            content_type="multipart/form-data",
+        )
+
+        response = self.client.post(
+            f"/exams/{exam_id}/enroll",
+            data={"file": (io.BytesIO(b"student_id\n10\n010\n20\n20\n"), "students.csv")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.history[0].status_code, 302)
+        self.assertEqual(response.request.path, "/enrollments/success")
+        self.assertEqual(response.request.args.get("count"), "0")
+        self.assertNotIn("Set-Cookie", response.history[0].headers)
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertIn(b"No new students were enrolled.", response.data)
+        self.assertNotIn(b'class="message error"', response.data)
+        refreshed = self.client.get(response.request.full_path)
+        self.assertIn(b"No new students were enrolled.", refreshed.data)
+        self.default_proxy.assert_not_called()
+        with self.app.extensions["admin_session_factory"]() as session:
+            self.assertEqual(
+                session.scalars(select(Enrollment.student_id).order_by(Enrollment.student_id)).all(),
+                [10, 20],
+            )
+
+    '''
+        Verify that a student already enrolled in another exam can still be
+        imported into the selected exam without duplicating their CSV entries.
+    '''
+    def test_existing_enrollments_in_another_exam_do_not_skip_students(self):
+        first_exam_id = self.schedule_exam()
+        with self.app.extensions["admin_session_factory"].begin() as session:
+            session.add(Enrollment(exam_id=first_exam_id, student_id=10))
+        response = self.client.post(
+            "/exams/schedule",
+            data={"course": "Databases", "date": self.exam_date.isoformat()},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(
+            "/exams/2/enroll",
+            data={"file": (io.BytesIO(b"student_id\n10\n10\n20\n"), "students.csv")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request.args.get("count"), "2")
+        self.assertIn(b"2 student(s) enrolled successfully.", response.data)
+        with self.app.extensions["admin_session_factory"]() as session:
+            enrollments = session.execute(
+                select(Enrollment.exam_id, Enrollment.student_id)
+                .order_by(Enrollment.exam_id, Enrollment.student_id)
+            ).all()
+        self.assertEqual(enrollments, [(first_exam_id, 10), (2, 10), (2, 20)])
+
+    '''
+        Verify that printing sends exam details and decimal student IDs to the
+        configured XML-RPC service and shows a refreshable confirmation.
+    '''
     def test_printing_order_calls_xmlrpc_contract(self):
-        """The XML-RPC request contains exam details and enrolled student IDs."""
         exam_id = self.schedule_exam()
         self.client.post(
             f"/exams/{exam_id}/enroll",
@@ -260,8 +369,11 @@ class AdminServiceTests(unittest.TestCase):
             str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10", "20"]
         )
 
+    '''
+        Verify with the real XML-RPC encoder that large exam and student IDs
+        are sent as decimal strings, including the largest signed 64-bit value.
+    '''
     def test_printing_order_supports_64bit_identifiers(self):
-        """Large exam and student IDs can be serialized by the real XML-RPC encoder."""
         exam_id = 2**63 - 1
         student_ids = [2**31, 2**63 - 1]
         session_factory = self.app.extensions["admin_session_factory"]
@@ -293,6 +405,10 @@ class AdminServiceTests(unittest.TestCase):
             [str(student_id) for student_id in student_ids],
         )
 
+    '''
+        Verify that both XML-RPC transports create the appropriate HTTP or HTTPS
+        connection with the configured timeout.
+    '''
     def test_printing_transport_supports_http_and_https_with_a_timeout(self):
         for transport_type, connection_type in (
             (TimeoutTransport, HTTPConnection),
@@ -307,6 +423,10 @@ class AdminServiceTests(unittest.TestCase):
                 finally:
                     transport.close()
 
+    '''
+        Verify against an unresponsive HTTP server that enrollment makes no
+        printing call, while an explicit order times out promptly and reports an error.
+    '''
     def test_enrollment_ignores_printing_and_explicit_printing_order_times_out(self):
         release = threading.Event()
 
@@ -354,6 +474,10 @@ class AdminServiceTests(unittest.TestCase):
             server.server_close()
             server_thread.join()
 
+    '''
+        Verify that a student ID above SQLite's signed 64-bit limit rejects
+        the entire upload, including an earlier valid student.
+    '''
     def test_enrollment_rejects_ids_outside_sqlite_range_atomically(self):
         exam_id = self.schedule_exam()
         contents = f"student_id\n10\n{2**63}\n".encode()
@@ -367,8 +491,11 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
+    '''
+        Verify that a printing network failure displays an error without
+        redirecting to success.
+    '''
     def test_printing_failure_is_reported(self):
-        """A network failure from the Printing Service is shown to the administrator."""
         exam_id = self.schedule_exam()
         self.client.post(
             f"/exams/{exam_id}/enroll",
@@ -391,8 +518,11 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(response.history, ())
         self.assertNotIn("Set-Cookie", response.headers)
 
+    '''
+        Verify that printing an exam with no enrollments reports an error
+        without contacting the Printing Service.
+    '''
     def test_printing_without_enrollments_is_not_sent(self):
-        """An exam with no enrolled students cannot be sent for printing."""
         exam_id = self.schedule_exam()
         with patch("as_app.ServerProxy") as server_proxy:
             response = self.client.post(
@@ -403,8 +533,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Enroll students before ordering", response.data)
         server_proxy.assert_not_called()
 
+    '''
+        Verify that a False XML-RPC result displays rejection rather than a success message.
+    '''
     def test_printing_rejection_is_not_reported_as_success(self):
-        """A negative Printing Service response is not presented as success."""
         exam_id = self.schedule_exam()
         self.client.post(
             f"/exams/{exam_id}/enroll",
@@ -422,6 +554,9 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Printing Service rejected the printing order", response.data)
         self.assertNotIn(b"Printing order sent successfully", response.data)
 
+    '''
+        Verify that the main pages load or initial success and error messages.
+    '''
     def test_pages_do_not_require_a_session_or_display_initial_messages(self):
         self.assertIsNone(self.app.secret_key)
         for path in ("/", "/exams", "/exams/schedule", "/enrollments"):
@@ -432,6 +567,10 @@ class AdminServiceTests(unittest.TestCase):
                 self.assertNotIn(b'class="message error"', response.data)
                 self.assertNotIn(b'class="message success"', response.data)
 
+    '''
+        Verify that missing or oversized course names preserve the form and
+        display specific errors without saving an exam.
+    '''
     def test_schedule_errors_preserve_the_form_without_a_session(self):
         for course, message in (("", b"Course is required."), ("A" * 201, b"Course must be at most 200 characters.")):
             with self.subTest(course=course):
@@ -448,6 +587,10 @@ class AdminServiceTests(unittest.TestCase):
             self.assertIsNone(session.scalar(select(Exam.id)))
         self.assertNotIn(b'class="message error"', self.client.get("/exams/schedule").data)
 
+    '''
+        Verify that invalid uploads, encoding, headers, and student values
+        display specific errors without saving enrollments.
+    '''
     def test_enrollment_validation_errors_use_specific_messages_without_saving(self):
         exam_id = self.schedule_exam()
         cases = (
@@ -461,6 +604,7 @@ class AdminServiceTests(unittest.TestCase):
             (b"student_id,student_identifier\n10,10\n", "students.csv", b"Use only one identifier column"),
             (b"student_id,note\n10,Valid\n,Missing\n", "students.csv", b"Missing student identifier on CSV line 3."),
             (b"student_id\n10\ninvalid\n", "students.csv", b"Invalid student identifier on CSV line 3."),
+            (b"student_id\n10\n10\ninvalid\n", "students.csv", b"Invalid student identifier on CSV line 4."),
             (b"student_id\n10\n0\n", "students.csv", b"Student identifiers must be positive 64-bit integers (CSV line 3)."),
             (b"student_id\n", "students.csv", b"The CSV file contains no student identifiers."),
         )
@@ -479,6 +623,10 @@ class AdminServiceTests(unittest.TestCase):
                     self.assertIsNone(session.scalar(select(Enrollment.student_id)))
         self.assertNotIn(b'class="message error"', self.client.get(f"/exams/{exam_id}/enroll").data)
 
+    '''
+        Verify that an enrollment integrity conflict displays a predefined
+        error without exposing database details or redirecting.
+    '''
     def test_enrollment_database_conflict_is_reported_without_a_session(self):
         exam_id = self.schedule_exam()
         conflict = IntegrityError("INSERT", {}, RuntimeError("concurrent enrollment"))
@@ -493,10 +641,16 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"One or more students are already enrolled in this exam.", response.data)
         self.assertNotIn(b"concurrent enrollment", response.data)
 
+    '''
+        Verify that confirmation URLs remain repeatable without printing calls
+        or database changes, and invalid counts use a generic message.
+        Normal listings must not display success or error messages.
+    '''
     def test_success_routes_are_repeatable_and_normal_lists_have_no_messages(self):
         cases = (
             ("/exams/success", b"Exam scheduled successfully."),
             ("/enrollments/success?count=2", b"2 student(s) enrolled successfully."),
+            ("/enrollments/success?count=0", b"No new students were enrolled."),
             ("/exams/printing/success", b"Printing order sent successfully."),
         )
         with patch("as_app.ServerProxy") as server_proxy:
@@ -508,7 +662,7 @@ class AdminServiceTests(unittest.TestCase):
                         self.assertIn(message, response.data)
                         self.assertNotIn("Set-Cookie", response.headers)
             server_proxy.assert_not_called()
-        for count in (None, "", "invalid", "0", "-1"):
+        for count in (None, "", "invalid", "-1"):
             response = self.client.get("/enrollments/success", query_string={"count": count})
             self.assertIn(b"Students enrolled successfully.", response.data)
             self.assertNotIn(b"student(s)", response.data)
@@ -520,6 +674,10 @@ class AdminServiceTests(unittest.TestCase):
             self.assertIsNone(session.scalar(select(Exam.id)))
             self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
+    '''
+        Verify that enrollment and printing routes return 404 for missing or
+        out-of-range exam IDs without contacting printing.
+    '''
     def test_missing_and_out_of_range_exam_ids_return_not_found(self):
         with patch("as_app.ServerProxy") as server_proxy:
             for exam_id in (0, 999, 2**63, 10**30):
@@ -530,6 +688,10 @@ class AdminServiceTests(unittest.TestCase):
                         self.assertNotIn("Set-Cookie", response.headers)
             server_proxy.assert_not_called()
 
+    '''
+        Verify that SQLite connections enforce foreign keys, reject enrollments
+        for missing exams, and delete enrollments when their exam is deleted.
+    '''
     def test_foreign_keys_reject_orphaned_enrollments_and_cascade_exam_deletion(self):
         engine = self.app.extensions["admin_engine"]
         with engine.connect() as first, engine.connect() as second:
@@ -548,6 +710,10 @@ class AdminServiceTests(unittest.TestCase):
         with session_factory() as session:
             self.assertIsNone(session.scalar(select(Enrollment.student_id)))
 
+    '''
+        Verify that XML-RPC faults and HTTP protocol errors display predefined
+        messages without internal details, while a None result is accepted as success.
+    '''
     def test_printing_rpc_errors_use_messages_and_default_success_is_supported(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -577,6 +743,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertEqual(response.headers["Location"], "/exams/printing/success")
         self.assertNotIn("Set-Cookie", response.headers)
 
+    '''
+        Verify that printing is blocked after the exam date without an RPC call
+        and that the exam listing hides the printing action.
+    '''
     def test_printing_after_exam_date_is_blocked_without_contacting_the_service(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -593,6 +763,9 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Enrollment and printing closed", listing.data)
         self.assertNotIn(f'action="/exams/{exam_id}/order-printing"'.encode(), listing.data)
 
+    '''
+        Verify that printing and additional enrollment remain allowed on the exam date.
+    '''
     def test_printing_on_exam_date_is_allowed(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -613,6 +786,10 @@ class AdminServiceTests(unittest.TestCase):
             str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10"]
         )
 
+    '''
+        Verify that late enrollment GET and POST requests return 409, hide the
+        upload form, preserve enrolled students, and make no printing calls.
+    '''
     def test_late_enrollment_is_blocked_without_changing_students_or_pdf_status(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -639,6 +816,10 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertEqual(session.scalars(select(Enrollment.student_id).order_by(Enrollment.student_id)).all(), [10])
 
+    '''
+        Verify that adding enrollments never triggers printing automatically
+        and that the next explicit order includes all currently enrolled students.
+    '''
     def test_new_enrollments_require_an_explicit_printing_order_with_all_students(self):
         exam_id = self.schedule_exam()
         proxy = MagicMock()
@@ -662,6 +843,10 @@ class AdminServiceTests(unittest.TestCase):
             str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10", "20", "30", "40"]
         )
 
+    '''
+        Verify that enrollment succeeds while printing is offline and remains
+        independent after an Admin restart, with explicit orders using persisted students.
+    '''
     def test_enrollment_without_printing_and_explicit_orders_work_after_restart(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -707,6 +892,10 @@ class AdminServiceTests(unittest.TestCase):
         finally:
             restarted.extensions["admin_engine"].dispose()
 
+    '''
+        Verify that the first enrollment succeeds without the Printing Service,
+        persists students, and shows a refreshable confirmation without warnings.
+    '''
     def test_first_enrollment_succeeds_when_only_admin_is_running(self):
         exam_id = self.schedule_exam()
         with patch("as_app.ServerProxy", side_effect=OSError("service offline")) as server_proxy:
@@ -735,6 +924,10 @@ class AdminServiceTests(unittest.TestCase):
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertEqual(session.scalars(select(Enrollment.student_id).order_by(Enrollment.student_id)).all(), [10, 20])
 
+    '''
+        Verify that obsolete printing query parameters cannot add warnings,
+        errors, or injected script markup to enrollment confirmations.
+    '''
     def test_enrollment_confirmation_ignores_old_printing_notice_parameters(self):
         for status in ("unavailable", "", "other", "<script>invalid</script>"):
             response = self.client.get("/enrollments/success", query_string={"count": "2", "printing": status})
@@ -745,6 +938,10 @@ class AdminServiceTests(unittest.TestCase):
             self.assertNotIn(b"<script>", response.data)
         self.assertNotIn(b'class="message notice"', self.client.get("/enrollments").data)
 
+    '''
+        Verify that an enrollment added during printing triggers a second RPC
+        request containing the updated student list before success is reported.
+    '''
     def test_first_printing_order_retries_if_students_are_added_during_the_request(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -768,6 +965,10 @@ class AdminServiceTests(unittest.TestCase):
             str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10", "20"]
         )
 
+    '''
+        Verify that continuously changing enrollments stop printing retries
+        after three calls and display a message asking for another explicit order.
+    '''
     def test_printing_reports_continuous_enrollment_changes(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
@@ -786,6 +987,10 @@ class AdminServiceTests(unittest.TestCase):
         self.assertIn(b"Enrollments changed during the PDF update.", response.data)
         self.assertEqual(proxy.__enter__.return_value.print_exam.call_count, 3)
 
+    '''
+        Verify that opening a legacy database preserves existing exam data
+        and retains exactly the required exam and enrollment columns.
+    '''
     def test_existing_sqlite_database_keeps_the_required_exam_columns(self):
         database_path = Path(self.temp_dir.name) / "legacy.sqlite"
         with closing(sqlite3.connect(database_path)) as connection:

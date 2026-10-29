@@ -5,6 +5,7 @@
   <h2>Enroll students — {{ exam.course }} ({{ exam.date.isoformat() }})</h2>
   {% if not enrollment_closed %}
   <p>Upload a UTF-8 CSV file with a <code>student_id</code> column and one student ID per row.</p>
+  <p>Duplicate student IDs and students already enrolled in this exam are skipped.</p>
   <form method="post" enctype="multipart/form-data">
     <label for="file">Student CSV
       <input id="file" name="file" type="file" accept=".csv,text/csv" required>

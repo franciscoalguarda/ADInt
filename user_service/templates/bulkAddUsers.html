@@ -6,6 +6,8 @@
     <h2>Bulk add users</h2>
 
     <p>Upload a UTF-8 CSV file with the columns <code>id</code>, <code>name</code>, <code>password</code> and <code>role</code>.</p>
+    <p>Existing users are skipped when their name, password and roles match. If any of these differ, the entire CSV is rejected and existing users remain unchanged.</p>
+    <p>For repeated IDs in the same CSV, only the first occurrence is considered.</p>
 
     <form method="post"
           action="{{ url_for('bulk_add_users') }}"

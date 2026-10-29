@@ -63,7 +63,7 @@ Papéis repetidos para o mesmo utilizador são considerados apenas uma vez.
 Antes de guardar, a aplicação confirma que todos os papéis selecionados existem
 na base de dados. Se algum estiver em falta, apresenta uma mensagem
 e não cria o utilizador nem guarda parcialmente os seus papéis. 
-No CSV, a mesma situação anula toda a importação.
+No CSV, a mesma situação num utilizador novo anula toda a importação.
 
 ## Importação CSV
 
@@ -91,17 +91,32 @@ Para testar:
 3. Seleciona o ficheiro e carrega em **Import Users**.
 4. Confirma a mensagem de sucesso e os quatro utilizadores na listagem.
 
-Os identificadores do exemplo devem estar livres na base de dados.
+Para importar os quatro utilizadores do exemplo, os seus identificadores devem
+estar livres na base de dados.
 
-A importação utiliza uma única transação: todos os utilizadores são guardados
-no fim. Se uma linha tiver dados inválidos, um identificador repetido no ficheiro
-ou um identificador já existente, nenhuma das linhas dessa importação é guardada.
-Os utilizadores que já existiam mantêm-se.
+A importação ignora utilizadores já existentes apenas quando o nome, a password
+e os papéis coincidem. Se um ID existente tiver algum desses dados diferente,
+todo o novo CSV é rejeitado: a mensagem identifica o ID e a linha do conflito,
+sem apresentar passwords. Os utilizadores existentes mantêm todos os seus dados.
+O nome é comparado após remover espaços nas extremidades; os papéis são
+comparados sem considerar a ordem ou repetições; a password é verificada contra
+o hash guardado e deve coincidir exatamente.
+
+Para IDs repetidos no mesmo ficheiro, considera apenas a primeira ocorrência,
+mesmo que as seguintes tenham dados diferentes. Os IDs são comparados como
+inteiros: `1001` e `01001` identificam o mesmo utilizador.
+
+Os utilizadores novos são guardados numa única transação. Dados inválidos num
+utilizador novo anulam todas as novas inserções dessa importação. Erros na
+estrutura do CSV ou nos identificadores também rejeitam o lote inteiro.
+A confirmação conta apenas os utilizadores novos. Se todos já existirem e os dados coincidirem,
+apresenta `No new users were imported.` (`count=0`). A criação individual pelo
+formulário continua a rejeitar identificadores já existentes.
 
 Ficheiros sem utilizadores, cabeçalhos inválidos, linhas com um número incorreto
 de campos e ficheiros com codificação inválida são rejeitados. Linhas vazias são
-ignoradas. Uma segunda importação do mesmo ficheiro é rejeitada por identificadores
-já existentes.
+ignoradas. Uma segunda importação do mesmo ficheiro não adiciona utilizadores
+nem altera os dados dos existentes.
 
 ## Base de dados
 
@@ -132,6 +147,10 @@ Os testes de criação e importação usam uma base de dados temporária.
 Também são verificadas as contagens da página inicial, incluindo utilizadores
 com vários papéis, a preservação dos campos após erros e os redirecionamentos
 de sucesso.
+Os testes de importação verificam também a exclusão de IDs duplicados, a
+preservação dos dados existentes, a primeira ocorrência no CSV e a confirmação
+quando não há novos utilizadores. Conflitos de nome, papéis ou password com um
+CSV anterior rejeitam todo o lote novo e preservam os registos originais.
 São ainda verificadas as chaves estrangeiras e a rejeição de papéis em falta
 na base de dados, incluindo o rollback de toda a importação CSV.
 

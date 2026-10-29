@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlalchemy.exc import IntegrityError
 from os import path
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from user_data import Role, User, Base
 
@@ -185,14 +185,35 @@ def get_csv_user_rows(reader):
         if any(value.strip() for value in row.values()):
             yield line_number, row
 
+class CsvUserConflictError(ValueError):
+    def __init__(self, user_id, line_number):
+        super().__init__("conflicting_csv_user")
+        self.user_id = user_id
+        self.line_number = line_number
+
+
 # CSV user saving
 def save_csv_users(reader, session):
     count = 0
+    seen_ids = set()
     for line_number, row in get_csv_user_rows(reader):
+        user_id = validate_user_id(row.get("id", ""))
+        if user_id in seen_ids:
+            continue
+        seen_ids.add(user_id)
+        existing_user = session.get(User, user_id)
+        if existing_user is not None:
+            if (
+                existing_user.name != (row.get("name") or "").strip()
+                or {role.name for role in existing_user.roles} != set(get_role_names(row))
+                or not check_password_hash(existing_user.password, row.get("password") or "")
+            ):
+                raise CsvUserConflictError(user_id, line_number)
+            continue
         create_user(row, session)
         count += 1
 
-    if count == 0:
+    if not seen_ids:
         raise ValueError("empty_csv")
 
     return count
@@ -202,6 +223,10 @@ def import_users_from_csv(upload):
     try:
         reader = read_users_csv(upload)
         with Session.begin() as session:
+            # Serialize imports before checking IDs so overlapping uploads
+            # validate users committed by the previous import.
+            if session.bind.dialect.name == "sqlite":
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return save_csv_users(reader, session)
     except UnicodeDecodeError as error:
         raise ValueError("invalid_csv") from error
@@ -211,7 +236,7 @@ def import_users_from_csv(upload):
         raise ValueError("duplicate_csv_id") from error
 
 
-def get_error_message(reason):
+def get_error_message(reason, **details):
     messages = {
         "duplicate_id": "User identifier already exists.",
         "invalid_role": "Invalid user role.",
@@ -226,11 +251,15 @@ def get_error_message(reason):
         "invalid_csv_row": "Invalid number of CSV fields.",
         "empty_csv": "CSV file contains no users.",
         "duplicate_csv_id": "Duplicate user identifier. No users were imported.",
+        "conflicting_csv_user": (
+            "User identifier {user_id} conflicts with existing user data on CSV line "
+            "{line_number}. No users were imported."
+        ),
     }
     return messages.get(
         reason,
         "Could not complete the operation.",
-    )
+    ).format(**details)
 
 
 # Web application routes
@@ -253,7 +282,9 @@ def list_users():
 def list_users_success():
     count = request.args.get("count", type=int)
     success = "User added successfully."
-    if count is not None and count > 0:
+    if count == 0:
+        success = "No new users were imported."
+    elif count is not None and count > 0:
         success = f"{count} users imported successfully."
 
     return render_template("listUsers.html", users=get_all_users(), success=success)
@@ -283,6 +314,10 @@ def bulk_add_users():
     if request.method == "POST":
         try:
             count = import_users_from_csv(request.files.get("file"))
+        except CsvUserConflictError as error:
+            error_message = get_error_message(
+                str(error), user_id=error.user_id, line_number=error.line_number
+            )
         except ValueError as error:
             error_message = get_error_message(str(error))
         else:

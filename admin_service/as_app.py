@@ -59,8 +59,6 @@ def get_error_message(reason, **details):
         "invalid_student_id": "Invalid student identifier on CSV line {line_number}.",
         "invalid_student_id_range": "Student identifiers must be positive 64-bit integers (CSV line {line_number}).",
         "empty_csv": "The CSV file contains no student identifiers.",
-        "duplicate_csv_id": "The CSV file contains duplicate student IDs.",
-        "already_enrolled": "Students already enrolled in this exam: {student_ids}.",
         "invalid_csv": "Invalid CSV format.",
         "enrollment_changed": "One or more students are already enrolled in this exam.",
         "no_students": "Enroll students before ordering the exam sheets.",
@@ -189,7 +187,7 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/exams/<int:exam_id>/enroll", methods=["GET", "POST"])
     def enroll_students(exam_id):
-        """Validate a CSV upload and atomically enroll its students in one exam."""
+        """Validate a CSV and atomically enroll new students, ignoring duplicates."""
         session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exam = get_exam_or_404(session, exam_id)
@@ -259,11 +257,10 @@ def create_app(database_url=None, printing_rpc_url=None):
 
                 if not student_ids:
                     raise ValueError("empty_csv")
-                if len(student_ids) != len(set(student_ids)):
-                    raise ValueError("duplicate_csv_id")
+                student_ids = list(dict.fromkeys(student_ids))
 
-                # Check all existing enrollments before inserting any rows so the
-                # complete upload succeeds or fails as one database transaction.
+                # Filter existing enrollments within the write transaction so
+                # overlapping uploads cannot insert the same student twice.
                 with session_factory.begin() as session:
                     begin_sqlite_write(session)
                     current_exam = get_exam_or_404(session, exam_id)
@@ -277,11 +274,10 @@ def create_app(database_url=None, printing_rpc_url=None):
                             )
                         ).all()
                     )
-                    if existing_ids:
-                        error_details["student_ids"] = ", ".join(
-                            str(student_id) for student_id in sorted(existing_ids)
-                        )
-                        raise ValueError("already_enrolled")
+                    student_ids = [
+                        student_id for student_id in student_ids
+                        if student_id not in existing_ids
+                    ]
                     session.add_all(
                         Enrollment(exam_id=exam_id, student_id=student_id)
                         for student_id in student_ids
@@ -320,7 +316,9 @@ def create_app(database_url=None, printing_rpc_url=None):
     def enrollments_success():
         count = request.args.get("count", type=int)
         success = "Students enrolled successfully."
-        if count is not None and count > 0:
+        if count == 0:
+            success = "No new students were enrolled."
+        elif count is not None and count > 0:
             success = f"{count} student(s) enrolled successfully."
         return render_enrollments(success=success)
 

@@ -46,7 +46,9 @@ novamente o ficheiro. Os erros de impressão apresentam a listagem de exames
 na resposta ao POST, com as ações disponíveis para tentar novamente.
 
 Após sucesso, há um redirecionamento para a rota de confirmação correspondente.
-Na inscrição, `count` indica o número de alunos. As confirmações permanecem após atualizar,
+Na inscrição, `count` indica o número de novas inscrições, sem contar duplicados.
+Se todos os alunos já estiverem inscritos, a confirmação informa que não foram
+adicionados novos alunos (`count=0`). As confirmações permanecem após atualizar,
 podem ser abertas diretamente e não repetem a operação. As rotas normais
 das listagens não apresentam mensagens de sucesso.
 
@@ -69,9 +71,11 @@ sem distinguir maiúsculas de minúsculas e devem ser únicos. Cada identificado
 é um inteiro positivo até `9223372036854775807`. Colunas adicionais são aceites
 quando declaradas no cabeçalho.
 
-A importação é atómica: dados inválidos, IDs repetidos no ficheiro ou alunos
-já inscritos nesse exame anulam todo o lote. As mensagens identificam a linha
-quando existe um erro nos campos ou no identificador.
+A importação ignora IDs repetidos no ficheiro e alunos já inscritos nesse exame,
+guardando apenas as novas inscrições. Um aluno inscrito noutro exame continua
+a poder ser inscrito no exame selecionado. Dados inválidos continuam a anular
+todo o lote; as novas inscrições são guardadas numa única transação.
+As mensagens identificam a linha quando existe um erro nos campos ou no identificador.
 Os IDs fornecidos não são validados na base de dados desse serviço.
 
 Os modelos `Exam` e `Enrollment` estão em `admin_data.py`. As chaves estrangeiras
@@ -122,7 +126,8 @@ Reiniciar ambos os serviços depois de atualizar o código.
 ```
 
 Os testes usam bases de dados temporárias e simulam a comunicação XML-RPC.
-Verificam validações, importação atómica, preservação dos campos, mensagens
+Verificam validações, importação atómica das novas inscrições, exclusão de duplicados,
+contagem de novas inscrições, preservação dos campos, mensagens
 sem cookies, confirmações, IDs de 64 bits e integridade das inscrições.
 Também cobrem o bloqueio por data, a impressão apenas por pedido explícito,
 a independência das inscrições face ao Printing e a preservação da estrutura
