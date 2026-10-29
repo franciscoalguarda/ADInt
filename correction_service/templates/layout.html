@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Correction Service</title>
+    <title>{% block title %}Correction Service{% endblock %}</title>
     <style>
       body { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; color: #20242a; }
       nav { display: flex; flex-wrap: wrap; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #ccd2da; }
@@ -20,8 +20,9 @@
       .comment { white-space: pre-wrap; }
       .table-container { overflow-x: auto; }
     </style>
+    {% block page_styles %}{% endblock %}
   </head>
-  <body>
+  <body class="{% block body_class %}{% endblock %}">
     <header><h1>Correction Service</h1></header>
     <nav aria-label="Main navigation">
       <a href="{{ url_for('index') }}">Home</a>
@@ -32,9 +33,12 @@
       <a href="{{ url_for('scans') }}">Scans and corrections</a>
     </nav>
     <main>
-      {% for category, message in get_flashed_messages(with_categories=true) %}
-        <p class="{{ category }}" role="status">{{ message }}</p>
-      {% endfor %}
+      {% if error %}
+        <p class="error" role="alert">{{ error }}</p>
+      {% endif %}
+      {% if success %}
+        <p class="success" role="status">{{ success }}</p>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </body>

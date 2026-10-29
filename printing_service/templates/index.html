@@ -1,0 +1,126 @@
+{% extends "layout.html" %}
+
+{% block title %}Overview — Printing Service{% endblock %}
+
+{% block page_styles %}
+  <style>
+    .printing-dashboard { display: grid; gap: 1.75rem; padding: .5rem 0 1.5rem; }
+    .printing-dashboard h2, .printing-dashboard h3, .printing-dashboard p { margin: 0; }
+    .printing-eyebrow { color: #0759a5; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .printing-intro h2 { margin: .5rem 0 .65rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; letter-spacing: -.045em; }
+    .printing-description { color: #596575; max-width: 38rem; }
+    .printing-catalog { min-width: 0; border: 1px solid #dce4ee; border-radius: 1rem; background: white; overflow: hidden; }
+    .printing-catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.4rem 1.5rem; }
+    .printing-catalog-heading h3 { font-size: 1.1rem; }
+    .printing-catalog-heading p { margin-top: .3rem; color: #596575; font-size: .85rem; }
+    .printing-badge { padding: .25rem .65rem; border-radius: 2rem; background: #eaf2fc; color: #0759a5; font-size: .8rem; font-weight: 600; white-space: nowrap; }
+    .printing-table { width: 100%; min-width: 660px; border-collapse: collapse; }
+    .printing-table th, .printing-table td { padding: 1rem; text-align: left; border-top: 1px solid #e5ebf2; }
+    .printing-table th { background: #f8fafc; color: #596575; font-size: .75rem; font-weight: 600; }
+    .printing-table th:first-child, .printing-table td:first-child { padding-left: 1.5rem; }
+    .printing-table th:last-child, .printing-table td:last-child { padding-right: 1.5rem; }
+    .printing-table tbody tr:hover { background: #f8fbff; }
+    .printing-table time, .printing-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .printing-exam-id { color: #0759a5; font-size: .85rem; font-weight: 600; }
+    .printing-course { min-width: 10rem; max-width: 20rem; overflow-wrap: anywhere; font-weight: 600; }
+    .printing-pdf-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .printing-pdf-actions form { margin: 0; }
+    .printing-pdf-link { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .7rem; border: 0; border-radius: .5rem; background: #eaf2fc; color: #0759a5; font-family: inherit; font-size: .85rem; font-weight: 600; line-height: inherit; text-decoration: none; white-space: nowrap; cursor: pointer; }
+    .printing-pdf-link:hover { background: #dbeafa; }
+    .printing-pdf-link svg { width: 1rem; height: 1rem; }
+    .printing-empty { display: grid; justify-items: center; gap: .8rem; padding: 2.5rem 1.5rem; border-top: 1px solid #e5ebf2; text-align: center; }
+    .printing-empty-icon { display: grid; place-items: center; width: 3.5rem; height: 3.5rem; border-radius: 1rem; background: #eaf2fc; color: #0759a5; }
+    .printing-empty-icon svg { width: 1.8rem; height: 1.8rem; }
+    .printing-empty h3 { font-size: 1.1rem; }
+    .printing-empty p { max-width: 34rem; color: #596575; font-size: .9rem; }
+    .printing-guide { padding: 1.4rem 1.5rem; border: 1px solid #dce4ee; border-radius: 1rem; background: white; }
+    .printing-guide h3 { font-size: 1.1rem; }
+    .printing-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; list-style: none; margin: 1.25rem 0 0; padding: 0; counter-reset: printing-step; }
+    .printing-steps li { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: .75rem; counter-increment: printing-step; }
+    .printing-steps li::before { content: counter(printing-step); display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #eaf2fc; color: #0759a5; font-size: .85rem; font-weight: 700; }
+    .printing-steps strong { display: block; margin-bottom: .3rem; font-size: .9rem; }
+    .printing-steps p { color: #596575; font-size: .85rem; }
+    .printing-dashboard .printing-note { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e5ebf2; color: #596575; font-size: .8rem; }
+    @media (max-width: 700px) {
+      .printing-steps { grid-template-columns: 1fr; }
+      .printing-catalog-heading { align-items: flex-start; }
+    }
+    @media (max-width: 360px) {
+      .printing-guide, .printing-catalog-heading { padding: 1.1rem; }
+      .printing-catalog-heading { flex-direction: column; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  {% set exam_count = exams | length %}
+  <div class="printing-dashboard">
+    <section class="printing-intro" aria-labelledby="overview-title">
+      <div>
+        <p class="printing-eyebrow">National exams · Resolution sheets</p>
+        <h2 id="overview-title">Printed exam sheets</h2>
+        <p class="printing-description">Browse generated exams, view PDFs or save them to the output folder.</p>
+      </div>
+    </section>
+
+    <section class="printing-catalog" id="printed-exams" aria-labelledby="catalog-title">
+      <div class="printing-catalog-heading">
+        <div>
+          <h3 id="catalog-title">Generated exams</h3>
+          <p>Each PDF contains the resolution sheets generated for that exam.</p>
+        </div>
+        <span class="printing-badge">{{ exam_count }} PDF{{ 's' if exam_count != 1 else '' }}</span>
+      </div>
+      {% if exams %}
+        <div class="table-container">
+          <table class="printing-table" aria-labelledby="catalog-title">
+            <thead><tr><th scope="col">Exam ID</th><th scope="col">Course</th><th scope="col">Date</th><th scope="col">Sheets</th><th scope="col">Pages</th><th scope="col">PDF</th></tr></thead>
+            <tbody>
+              {% for row in exams %}
+                <tr>
+                  <td><span class="printing-exam-id">#{{ row.exam.id }}</span></td>
+                  <td class="printing-course">{{ row.exam.course }}</td>
+                  <td><time datetime="{{ row.exam.exam_date.isoformat() }}">{{ row.exam.exam_date.isoformat() }}</time></td>
+                  <td class="printing-number">{{ row.sheet_count }}</td>
+                  <td class="printing-number">{{ row.sheet_count * 4 }}</td>
+                  <td>
+                    <div class="printing-pdf-actions">
+                      <a class="printing-pdf-link" href="{{ url_for('view_exam_pdf', exam_id=row.exam.id) }}" aria-label="Open PDF for {{ row.exam.course }}, exam {{ row.exam.id }}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5"/></svg>
+                        Open PDF
+                      </a>
+                      <form method="post" action="{{ url_for('save_exam_pdf', exam_id=row.exam.id) }}">
+                        <button class="printing-pdf-link" type="submit" aria-label="Save PDF for {{ row.exam.course }}, exam {{ row.exam.id }} to the output folder">
+                          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12 3v12M7 10l5 5 5-5M5 17v4h14v-4"/></svg>
+                          Save to output
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="printing-empty" id="empty-state">
+          <span class="printing-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/><path d="M18 12h.01"/></svg>
+          </span>
+          <h3>No PDFs generated yet</h3>
+          <p>Schedule an exam and enroll students in the Admin Service, then choose Order printing. The generated PDF will appear here.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="printing-guide" aria-labelledby="guide-title">
+      <h3 id="guide-title">From exam to PDF</h3>
+      <ol class="printing-steps">
+        <li><div><strong>Schedule and enroll</strong><p>Create the exam and add its students in the Admin Service.</p></div></li>
+        <li><div><strong>Order printing</strong><p>Request the exam resolution sheets from the exam list.</p></div></li>
+        <li><div><strong>View or save</strong><p>Open the PDF or save its latest version to the output folder.</p></div></li>
+      </ol>
+      <p class="printing-note">Each resolution sheet contains four answer pages. Existing QR codes remain unchanged when the PDF is updated.</p>
+    </section>
+  </div>
+{% endblock %}

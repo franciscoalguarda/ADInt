@@ -24,7 +24,7 @@ python -m venv venv
 Instala as dependências e inicia o serviço:
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install Flask SQLAlchemy
+.\venv\Scripts\python.exe -m pip install -r user_service\requirements.txt
 .\venv\Scripts\python.exe user_service\su_app.py
 ```
 
@@ -35,13 +35,11 @@ O serviço é iniciado em modo de desenvolvimento, com `debug=True`.
 
 | Caminho | Métodos | Funcionalidade |
 | --- | --- | --- |
-| `/` | GET | Página inicial e navegação. |
+| `/` | GET | Página inicial com cartões de ação, total de utilizadores e contagens por papel. |
 | `/list_users` | GET | SU_1: listar identificadores, nomes e papéis, por ordem de identificador. |
+| `/list_users/sucess` | GET | Listar utilizadores com a confirmação de adição ou importação. |
 | `/users/add` | GET, POST | SU_2: apresentar o formulário e adicionar um utilizador. |
 | `/users/bulk-add` | GET, POST | SU_3: apresentar o formulário e importar um CSV. |
-
-As mensagens de sucesso ou erro são apresentadas nas páginas através de
-`flash()` e do template `layout.html`.
 
 ## Dados dos utilizadores
 
@@ -62,6 +60,10 @@ Os papéis disponíveis são:
 No formulário de criação, seleciona um ou mais papéis através das checkboxes.
 Os nomes dos papéis no CSV têm de corresponder exatamente aos valores acima.
 Papéis repetidos para o mesmo utilizador são considerados apenas uma vez.
+Antes de guardar, a aplicação confirma que todos os papéis selecionados existem
+na base de dados. Se algum estiver em falta, apresenta uma mensagem
+e não cria o utilizador nem guarda parcialmente os seus papéis. 
+No CSV, a mesma situação num utilizador novo anula toda a importação.
 
 ## Importação CSV
 
@@ -89,17 +91,32 @@ Para testar:
 3. Seleciona o ficheiro e carrega em **Import Users**.
 4. Confirma a mensagem de sucesso e os quatro utilizadores na listagem.
 
-Os identificadores do exemplo devem estar livres na base de dados.
+Para importar os quatro utilizadores do exemplo, os seus identificadores devem
+estar livres na base de dados.
 
-A importação utiliza uma única transação: todos os utilizadores são guardados
-no fim. Se uma linha tiver dados inválidos, um identificador repetido no ficheiro
-ou um identificador já existente, nenhuma das linhas dessa importação é guardada.
-Os utilizadores que já existiam mantêm-se.
+A importação ignora utilizadores já existentes apenas quando o nome, a password
+e os papéis coincidem. Se um ID existente tiver algum desses dados diferente,
+todo o novo CSV é rejeitado: a mensagem identifica o ID e a linha do conflito,
+sem apresentar passwords. Os utilizadores existentes mantêm todos os seus dados.
+O nome é comparado após remover espaços nas extremidades; os papéis são
+comparados sem considerar a ordem ou repetições; a password é verificada contra
+o hash guardado e deve coincidir exatamente.
+
+Para IDs repetidos no mesmo ficheiro, considera apenas a primeira ocorrência,
+mesmo que as seguintes tenham dados diferentes. Os IDs são comparados como
+inteiros: `1001` e `01001` identificam o mesmo utilizador.
+
+Os utilizadores novos são guardados numa única transação. Dados inválidos num
+utilizador novo anulam todas as novas inserções dessa importação. Erros na
+estrutura do CSV ou nos identificadores também rejeitam o lote inteiro.
+A confirmação conta apenas os utilizadores novos. Se todos já existirem e os dados coincidirem,
+apresenta `No new users were imported.` (`count=0`). A criação individual pelo
+formulário continua a rejeitar identificadores já existentes.
 
 Ficheiros sem utilizadores, cabeçalhos inválidos, linhas com um número incorreto
 de campos e ficheiros com codificação inválida são rejeitados. Linhas vazias são
-ignoradas. Uma segunda importação do mesmo ficheiro é rejeitada por identificadores
-já existentes.
+ignoradas. Uma segunda importação do mesmo ficheiro não adiciona utilizadores
+nem altera os dados dos existentes.
 
 ## Base de dados
 
@@ -117,23 +134,34 @@ As tabelas inexistentes e os papéis predefinidos são criados no arranque:
 
 A relação entre utilizadores e papéis é de muitos para muitos, permitindo que
 um utilizador tenha vários papéis e que um papel pertença a vários utilizadores.
+As chaves estrangeiras são ativadas em cada ligação SQLite, impedindo associações
+a utilizadores ou papéis inexistentes e a remoção direta de registos referenciados.
 
-## Configuração
-
-A variável de ambiente `USER_SECRET_KEY` permite definir a chave das sessões
-Flask, utilizadas pelas mensagens `flash()`. Se não for definida, a aplicação
-gera uma chave aleatória em cada arranque.
-
-Para a definir em PowerShell, antes de iniciar o serviço:
+## Testes
 
 ```powershell
-$env:USER_SECRET_KEY = "chave-local-para-desenvolvimento"
+.\venv\Scripts\python.exe -m unittest discover -s user_service -v
 ```
+
+Os testes de criação e importação usam uma base de dados temporária.
+Também são verificadas as contagens da página inicial, incluindo utilizadores
+com vários papéis, a preservação dos campos após erros e os redirecionamentos
+de sucesso.
+Os testes de importação verificam também a exclusão de IDs duplicados, a
+preservação dos dados existentes, a primeira ocorrência no CSV e a confirmação
+quando não há novos utilizadores. Conflitos de nome, papéis ou password com um
+CSV anterior rejeitam todo o lote novo e preservam os registos originais.
+São ainda verificadas as chaves estrangeiras e a rejeição de papéis em falta
+na base de dados, incluindo o rollback de toda a importação CSV.
 
 ## Estrutura
 
 - [su_app.py](su_app.py): configuração da aplicação, consultas, validação,
-  criação de utilizadores, importação CSV e rotas.
+  criação de utilizadores, importação CSV, contagens do resumo e rotas.
 - [user_data.py](user_data.py): modelos SQLAlchemy `User` e `Role` e a tabela
   de associação `UserRoles`.
 - [templates/](templates/): páginas HTML e estrutura comum da aplicação.
+- [requirements.txt](requirements.txt): dependências Python do serviço.
+- [test_su_app.py](test_su_app.py): testes automatizados do serviço.
+- [test_users.csv](test_users.csv): exemplo de importação com cinco utilizadores,
+  incluindo um utilizador com vários papéis.

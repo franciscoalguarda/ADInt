@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Printing Service{% endblock %}</title>
+    <style>
+      :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; }
+      body { max-width: 1080px; margin: 2rem auto; padding: 0 1rem; color: #20242a; background: #f4f7fb; }
+      header h1 { margin: 0 0 1.5rem; font-size: clamp(2rem, 4vw, 2.5rem); line-height: 1.15; letter-spacing: -.03em; }
+      a { color: #0759a5; }
+      a:focus-visible { outline: 3px solid #0759a5; outline-offset: 4px; }
+      .table-container { max-width: 100%; overflow-x: auto; }
+      .message { padding: .8rem 1rem; border-radius: .5rem; }
+      .message.success { color: #166534; background: #ecfdf3; border: 1px solid #bbf7d0; }
+      .message.error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
+    </style>
+    {% block page_styles %}{% endblock %}
+  </head>
+  <body>
+    <header><h1>Printing Service</h1></header>
+    <main>
+      {% if error %}<p class="message error" role="alert">{{ error }}</p>{% endif %}
+      {% if success %}<p class="message success" role="status">{{ success }}</p>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

@@ -1,5 +1,5 @@
-Flask>=3.1,<4
-SQLAlchemy>=2,<3
-PyMuPDF>=1.24,<3
-numpy>=2,<3
-opencv-python>=4.10,<6
+Flask
+SQLAlchemy
+PyMuPDF>=1.24.3
+numpy
+opencv-python

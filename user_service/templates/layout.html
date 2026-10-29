@@ -27,8 +27,9 @@
       .error { background: #fde8e7; }
       pre { overflow-x: auto; padding: .8rem; background: #f5f7fa; }
     </style>
+    {% block page_styles %}{% endblock %}
   </head>
-  <body>
+  <body class="{% block body_class %}{% endblock %}">
     <header><h1>User Service</h1></header>
     <nav aria-label="Main navigation">
       <a href="{{ url_for('index') }}">Home</a>
@@ -37,9 +38,12 @@
       <a href="{{ url_for('bulk_add_users') }}">Bulk add users</a>
     </nav>
     <main>
-        {% for category, message in get_flashed_messages(with_categories=true) %}
-            <p class="message {{ category }}" role="status">{{ message }}</p>
-        {% endfor %}
+        {% if error %}
+            <p class="message error" role="alert">{{ error }}</p>
+        {% endif %}
+        {% if success %}
+            <p class="message success" role="status">{{ success }}</p>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
   </body>
