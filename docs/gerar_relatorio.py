@@ -28,7 +28,7 @@ AUTHORS = (
 # Use set() to keep only automatic breaks when a page fills up.
 PAGE_BREAK_BEFORE = {
     "2.", "3.", "4.", "5.", "6.", "7.", "8.",
-    "3.3.", "3.3.3.", "5.3.", "6.3.",
+    "3.3.", "3.3.3.", "5.3.",
 }
 
 CSS = """

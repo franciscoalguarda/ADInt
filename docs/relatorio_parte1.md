@@ -252,11 +252,9 @@ As respostas recebem números sequenciais de página e de folha e são associada
 
 ### 6.3. Correção e consulta
 
-A correção só pode ser guardada ou editada depois de existir uma atribuição para o par exame/questão. Sem atribuição, o GET e o POST da rota de correção devolvem HTTP 409 e a interface apresenta a opção de atribuir professor. As páginas PDF e PNG continuam disponíveis para consulta.
+A correção só pode ser guardada ou editada depois de existir uma atribuição para o par exame/questão. Sem atribuição, o GET e o POST da rota de correção devolvem HTTP 409 e a interface apresenta a opção de atribuir professor. As páginas PDF e PNG continuam disponíveis para consulta. A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito. Não está definido um limite máximo de nota por questão. O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso.
+ As listas de respostas e digitalizações são públicas e não são filtradas por professor ou aluno.  O PDF original pode ser descarregado separadamente.
 
-A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito. **Não está definido um limite máximo de nota por questão.** O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso.
-
-As listas de respostas e digitalizações são públicas e não são filtradas por professor ou aluno. ST_3 é parcial: permite consultar os documentos e as correções, mas não identifica o aluno. O PDF original pode ser descarregado separadamente.
 
 ### 6.4. Páginas e endpoints
 
@@ -300,7 +298,9 @@ Esta tabela não depende da existência de um PDF: permite configurar as atribui
 
 A relação entre estes modelos é **um-para-muitos**: um upload origina várias respostas. A chave estrangeira `exam_correction_pdf_id` liga cada resposta à sua origem. As propriedades `ExamCorrectionPdf.corrections` e `QuestionCorrection.source` são bidirecionais, através de `back_populates`. A configuração `cascade="all, delete-orphan"` remove as respostas dependentes quando a origem é eliminada pelo ORM ou quando deixam de pertencer à sua coleção. Não é uma cascata SQL declarada com `ON DELETE CASCADE`.
 
-O trio origem/folha/questão é único. O atributo `sheet_number` numera as folhas dentro do upload, com valores positivos, sem identificar o aluno ou o QR code. O atributo `question_number` varia de 1 a 4. As consultas ordenam por origem, folha e questão. Os PDFs e PNGs usam carregamento diferido, evitando carregá-los automaticamente nas listagens. A propriedade`page_number` é calculada por `(sheet_number - 1) * 4 + question_number`, sem coluna própria.
+O trio origem/folha/questão é único. O atributo `sheet_number` numera as folhas dentro do upload, com valores positivos, sem identificar o aluno ou o QR code. O atributo `question_number` varia de 1 a 4. As consultas ordenam por origem, folha e questão. Os PDFs e PNGs usam carregamento diferido, evitando carregá-los automaticamente nas listagens.
+
+A propriedade `page_number` é calculada por `(sheet_number - 1) * 4 + question_number`, sem coluna própria.
 
 #### 6.5.3. Avaliação e associação ao professor
 
