@@ -38,9 +38,9 @@ class ExamCorrectionPdf(Base):
 class QuestionCorrection(Base):
     __tablename__ = "question_corrections"
     __table_args__ = (
-        UniqueConstraint("exam_correction_pdf_id", "page_number"),
+        UniqueConstraint("exam_correction_pdf_id", "sheet_number", "question_number"),
         CheckConstraint("question_number BETWEEN 1 AND 4"),
-        CheckConstraint("page_number > 0 AND sheet_number > 0"),
+        CheckConstraint("sheet_number > 0"),
         CheckConstraint(
             "(evaluated = 0 AND grade IS NULL) OR (evaluated = 1 AND grade >= 0 AND grade IS NOT NULL)"
         ),
@@ -50,7 +50,6 @@ class QuestionCorrection(Base):
     exam_correction_pdf_id = Column(
         Integer, ForeignKey("exam_correction_pdfs.id"), nullable=False
     )
-    page_number = Column(Integer, nullable=False)
     sheet_number = Column(Integer, nullable=False)
     question_number = Column(Integer, nullable=False)
     page_pdf_file = deferred(Column(LargeBinary, nullable=False))
@@ -59,3 +58,8 @@ class QuestionCorrection(Base):
     grade = Column(Float, nullable=True)
     comment = Column(Text, nullable=False, default="")
     source = relationship("ExamCorrectionPdf", back_populates="corrections")
+
+    @property
+    def page_number(self):
+        # Return the processed page position without storing redundant data.
+        return (self.sheet_number - 1) * 4 + self.question_number

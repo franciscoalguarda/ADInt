@@ -58,10 +58,11 @@ O agendamento exige uma unidade curricular com até 200 caracteres e uma data
 igual ou posterior à data atual do servidor. O identificador do exame é gerado
 pela base de dados. IDs de exame inexistentes ou fora do intervalo positivo
 de 64 bits nos URLs devolvem HTTP 404.
-Depois da data do exame, novas inscrições e pedidos de impressão são bloqueados;
-no próprio dia, continuam permitidos. O bloqueio é aplicado no servidor e as
-ações deixam de estar disponíveis na listagem. O acesso ao formulário de
-inscrição de um exame passado devolve HTTP 409.
+Depois da data do exame, novas inscrições são bloqueadas, mas no próprio dia,
+continuam permitidas. O bloqueio é aplicado no servidor e a ação de inscrição
+deixa de estar disponível na listagem. O acesso ao formulário de inscrição de
+um exame passado devolve HTTP 409. Os pedidos de impressão continuam disponíveis
+depois da data do exame, usando os alunos já inscritos.
 
 O ficheiro de inscrições deve ter extensão `.csv`, usar UTF-8 com ou sem BOM
 e conter apenas uma coluna de identificação: `student_id` ou `student_identifier`.
@@ -116,7 +117,7 @@ alterações mantém o mesmo PDF.
 
 O Printing Service pode estar desligado durante a inscrição. Para gerar ou
 atualizar o PDF, é necessário que esteja disponível quando se carrega em
-`Order printing`, antes de terminar a data do exame. Cada pedido usa as
+`Order printing`, mesmo depois da data do exame. Cada pedido usa as
 inscrições atuais da base do Admin, incluindo após reiniciar o serviço.
 
 Reiniciar ambos os serviços depois de atualizar o código.
@@ -133,7 +134,7 @@ sem criar nem modificar `admin_service/admin.sqlite`.
 Verificam validações, importação atómica das novas inscrições, exclusão de duplicados,
 contagem de novas inscrições, preservação dos campos, mensagens
 sem cookies, confirmações, IDs de 64 bits e integridade das inscrições.
-Também cobrem o bloqueio por data, a impressão apenas por pedido explícito,
+Também cobrem o bloqueio das inscrições por data, a impressão após o exame e apenas por pedido explícito,
 a independência das inscrições face ao Printing e a preservação da estrutura
 pedida para a base de dados. Os testes de integração entre
 Admin e Printing estão em `printing_service/test_admin_printing.py` e são

@@ -795,24 +795,27 @@ class AdminServiceTests(unittest.TestCase):
             thread.join()
 
     '''
-        Verify that printing is blocked after the exam date without an RPC call
-        and that the exam listing hides the printing action.
+        Verify that late printing calls XML-RPC and remains available in the
+        exam listing while the enrollment action is closed.
     '''
-    def test_printing_after_exam_date_is_blocked_without_contacting_the_service(self):
+    def test_printing_after_exam_date_is_allowed_while_enrollment_is_closed(self):
         exam_id = self.schedule_exam()
         self.client.post(f"/exams/{exam_id}/enroll", data={
             "file": (io.BytesIO(b"student_id\n10\n"), "students.csv"),
         })
         with patch("as_app.date", wraps=date) as server_date:
             server_date.today.return_value = self.exam_date + timedelta(days=1)
-            with patch("as_app.ServerProxy") as proxy:
+            with patch("as_app.ServerProxy", return_value=self.default_proxy):
                 response = self.client.post(f"/exams/{exam_id}/order-printing")
-                proxy.assert_not_called()
             listing = self.client.get("/exams")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Resolution sheets cannot be printed after the exam date.", response.data)
-        self.assertIn(b"Enrollment and printing closed", listing.data)
-        self.assertNotIn(f'action="/exams/{exam_id}/order-printing"'.encode(), listing.data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/exams/printing/success")
+        self.default_proxy.__enter__.return_value.print_exam.assert_called_once_with(
+            str(exam_id), self.exam_date.isoformat(), "Algorithms", ["10"]
+        )
+        self.assertIn(b"Enrollment closed", listing.data)
+        self.assertIn(f'action="/exams/{exam_id}/order-printing"'.encode(), listing.data)
+        self.assertNotIn(f'href="/exams/{exam_id}/enroll"'.encode(), listing.data)
 
     '''
         Verify that printing and additional enrollment remain allowed on the exam date.
@@ -862,8 +865,9 @@ class AdminServiceTests(unittest.TestCase):
                     self.assertNotIn(b'name="file"', response.data)
                 server_proxy.assert_not_called()
             listing = self.client.get("/exams")
-        self.assertIn(b"Enrollment and printing closed", listing.data)
-        self.assertNotIn(b">Update PDF<", listing.data)
+        self.assertIn(b"Enrollment closed", listing.data)
+        self.assertIn(f'action="/exams/{exam_id}/order-printing"'.encode(), listing.data)
+        self.assertNotIn(f'href="/exams/{exam_id}/enroll"'.encode(), listing.data)
         with self.app.extensions["admin_session_factory"]() as session:
             self.assertEqual(session.scalars(select(Enrollment.student_id).order_by(Enrollment.student_id)).all(), [10])
 

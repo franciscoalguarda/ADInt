@@ -66,7 +66,6 @@ def get_error_message(reason, **details):
         "printing_unavailable": "Could not contact the Printing Service. Please try again.",
         "printing_failed": "The Printing Service could not complete the printing order. Please try again.",
         "printing_rejected": "The Printing Service rejected the printing order.",
-        "past_printing_date": "Resolution sheets cannot be printed after the exam date.",
         "past_enrollment_date": "Students cannot be enrolled after the exam date.",
         "printing_changed": "Enrollments changed during the PDF update. Use Order printing to update it again.",
     }
@@ -121,7 +120,6 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/")
     def index():
-        """Show summary counts for scheduled exams and student enrollments."""
         session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exam_count = session.scalar(select(func.count()).select_from(Exam))
@@ -136,7 +134,6 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/exams/schedule", methods=["GET", "POST"])
     def schedule_exam():
-        """Display the scheduling form or validate and save a submitted exam."""
         error_message = None
         if request.method == "POST":
             course = request.form.get("course", "").strip()
@@ -166,7 +163,7 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/exams")
     def list_exams():
-        """List exams in chronological order."""
+        # List exams in chronological order.
         return render_exams()
 
     def render_exams(error=None, success=None):
@@ -188,7 +185,6 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/exams/<int:exam_id>/enroll", methods=["GET", "POST"])
     def enroll_students(exam_id):
-        """Validate a CSV and atomically enroll new students, ignoring duplicates."""
         session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exam = get_exam_or_404(session, exam_id)
@@ -296,7 +292,7 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/enrollments")
     def list_enrollments():
-        """Show each enrollment alongside the corresponding exam details."""
+        # Show each enrollment alongside the corresponding exam details.
         return render_enrollments()
 
     def render_enrollments(success=None):
@@ -325,7 +321,7 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.post("/exams/<int:exam_id>/order-printing")
     def order_printing(exam_id):
-        """Send the exam and enrolled student IDs to the Printing Service via XML-RPC."""
+        # Send the exam and enrolled student IDs to the Printing Service via XML-RPC.
         try:
             send_printing_order(exam_id)
         except ValueError as error:
@@ -337,8 +333,6 @@ def create_app(database_url=None, printing_rpc_url=None):
         for _ in range(3):
             with session_factory() as session:
                 exam = get_exam_or_404(session, exam_id)
-                if exam.date < date.today():
-                    raise ValueError("past_printing_date")
                 exam_data = (exam.id, exam.date.isoformat(), exam.course)
                 student_ids = session.scalars(select(Enrollment.student_id).where(
                     Enrollment.exam_id == exam_id

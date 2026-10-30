@@ -132,7 +132,7 @@ O Admin Service agenda exames, importa inscrições de alunos, apresenta a infor
 
 O agendamento exige uma unidade curricular não vazia, com até 200 caracteres, e uma data igual ou posterior à data atual do servidor. O ID do exame é gerado pela base de dados. Nos URLs, exames inexistentes ou IDs fora do intervalo positivo de 64 bits devolvem HTTP 404.
 
-A inscrição aceita CSV UTF-8, com ou sem BOM, com uma coluna de identificação: `student_id` ou `student_identifier`. Os cabeçalhos são normalizados sem distinguir maiúsculas de minúsculas e têm de ser únicos. A presença simultânea das duas colunas de identificação é rejeitada. Colunas adicionais são permitidas quando declaradas no cabeçalho e vírgulas dentro de campos são aceites entre aspas.
+A inscrição aceita CSV UTF-8, com uma coluna de identificação: `student_id` ou `student_identifier`. Os cabeçalhos são normalizados sem distinguir maiúsculas de minúsculas e têm de ser únicos. A presença simultânea das duas colunas de identificação é rejeitada.
 
 ```csv
 student_id
@@ -144,7 +144,7 @@ IDs repetidos no CSV e alunos já inscritos nesse exame são ignorados. Um aluno
 
 A confirmação apresenta apenas o número de novas inscrições. Se não existir nenhuma, informa `No new students were enrolled.` com `count=0`. As inscrições existentes mantêm-se inalteradas.
 
-Depois da data do exame, inscrições e impressão são bloqueadas. No próprio dia continuam permitidas. A listagem oculta as ações quando estão encerradas e o formulário de inscrição de um exame passado devolve HTTP 409.
+Depois da data do exame, novas inscrições são bloqueadas. A listagem oculta a ação de inscrição quando está encerrada e o formulário de inscrição de um exame passado devolve HTTP 409. Os pedidos de impressão continuam disponíveis depois dessa data, usando os alunos já inscritos e preservando os identificadores e QR codes das folhas existentes.
 
 ### 4.2. Páginas e endpoints
 
@@ -167,7 +167,7 @@ Os modelos são definidos em `admin_service/admin_data.py`.
 | Modelo | Tabela | Campos persistidos |
 | --- | --- | --- |
 | `Exam` | `exams` | `id` (PK gerada), `date`, `course` |
-| `Enrollment` | `enrolled_students` | `exam_id` e `student_id` (PK composta), `exam_id` é FK |
+| `Enrollment` | `enrolled_students` | `exam_id` e `student_id` (PK composta) |
 
 As chaves estrangeiras impedem inscrições em exames inexistentes. A eliminação de um exame elimina as respetivas inscrições em cascata.
 
@@ -188,11 +188,11 @@ print_exam(exam_id, exam_date, course, student_ids)
 | Argumento | Representação e validação |
 | --- | --- |
 | `exam_id` | Inteiro positivo ou texto decimal até `2**63 - 1` |
-| `exam_date` | Texto no formato `YYYY-MM-DD` e não pode estar no passado |
+| `exam_date` | Texto no formato `YYYY-MM-DD`, podendo corresponder a uma data passada |
 | `course` | Texto não vazio |
 | `student_ids` | Lista não vazia de IDs válidos, sem repetições |
 
-O Admin envia o ID do exame e os IDs de alunos como textos decimais para evitar o limite de 32 bits dos inteiros XML-RPC. O Printing normaliza os valores e guarda-os como inteiros no SQLite. Valores inválidos, repetidos ou fora do intervalo são rejeitados. A data é novamente validada no próprio endpoint, incluindo em chamadas diretas.
+O Admin envia o ID do exame e os IDs de alunos como textos decimais para evitar o limite de 32 bits dos inteiros XML-RPC. O Printing normaliza os valores e guarda-os como inteiros no SQLite. Valores inválidos, repetidos ou fora do intervalo são rejeitados. O formato da data é validado no próprio endpoint, incluindo em chamadas diretas, mas uma data passada não impede a impressão.
 
 ### 5.2. Geração, repetição e recuperação
 
@@ -255,7 +255,7 @@ As respostas recebem números sequenciais de página e de folha e são associada
 
 A correção só pode ser guardada ou editada depois de existir uma atribuição para o par exame/questão. Sem atribuição, o GET e o POST da rota de correção devolvem HTTP 409 e a interface apresenta a opção de atribuir professor. As páginas PDF e PNG continuam disponíveis para consulta.
 
-A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito, e zero é uma correção válida. **Não está definido um limite máximo por questão.** O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso. Não é calculada a nota final agregada do exame.
+A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito. **Não está definido um limite máximo de nota por questão.** O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso.
 
 As listas de respostas e digitalizações são públicas e não são filtradas por professor ou aluno. ST_3 é parcial: permite consultar os documentos e as correções, mas não identifica o aluno. O PDF original pode ser descarregado separadamente.
 
@@ -287,7 +287,7 @@ Os modelos definidos em `correction_service/correction_data.py` separam três re
 | --- | --- | --- |
 | `ProfessorAssignment` | `professor_assignment` | `id` (PK), `professor_id`, `exam_id`, `question_number` |
 | `ExamCorrectionPdf` | `exam_correction_pdfs` | `id` (PK), `exam_id`, `filename`, `pdf_file` |
-| `QuestionCorrection` | `question_corrections` | `id` (PK), `exam_correction_pdf_id` (FK), `page_number`, `sheet_number`, `question_number`, `page_pdf_file`, `page_png_file`, `evaluated`, `grade`, `comment` |
+| `QuestionCorrection` | `question_corrections` | `id` (PK), `exam_correction_pdf_id` (FK), `sheet_number`, `question_number`, `page_pdf_file`, `page_png_file`, `evaluated`, `grade`, `comment` |
 
 #### 6.5.1. Atribuição independente das digitalizações
 
@@ -301,17 +301,17 @@ Esta tabela não depende da existência de um PDF: permite configurar as atribui
 
 A relação entre estes modelos é **um-para-muitos**: um upload origina várias respostas. A chave estrangeira `exam_correction_pdf_id` liga cada resposta à sua origem. As propriedades `ExamCorrectionPdf.corrections` e `QuestionCorrection.source` são bidirecionais, através de `back_populates`. A configuração `cascade="all, delete-orphan"` remove as respostas dependentes quando a origem é eliminada pelo ORM ou quando deixam de pertencer à sua coleção. Não é uma cascata SQL declarada com `ON DELETE CASCADE`.
 
-O par origem/número de página é único. `page_number` identifica a posição da resposta processada. `sheet_number` é uma numeração interna da folha dentro do upload, não o ID do QR code nem a identidade do aluno. Ambos são positivos. `question_number` varia de 1 a 4. Os PDFs e PNGs são colunas binárias com carregamento diferido, evitando carregá-los automaticamente em todas as consultas.
+O trio origem/folha/questão é único. O atributo `sheet_number` numera as folhas dentro do upload, com valores positivos, sem identificar o aluno ou o QR code. O atributo `question_number` varia de 1 a 4. As consultas ordenam por origem, folha e questão. Os PDFs e PNGs usam carregamento diferido, evitando carregá-los automaticamente nas listagens. A propriedade`page_number` é calculada por `(sheet_number - 1) * 4 + question_number`, sem coluna própria.
 
 #### 6.5.3. Avaliação e associação ao professor
 
-`evaluated`, `grade` e `comment` pertencem à resposta individual. A restrição de avaliação mantém a nota nula enquanto a resposta está pendente e exige uma nota não nula e não negativa quando está avaliada. Zero é válido. A aplicação complementa esta restrição ao rejeitar valores não finitos. Não existe uma cotação máxima configurada.
+Os atributos `evaluated`, `grade` e `comment` pertencem à resposta individual. A restrição de avaliação mantém a nota nula enquanto a resposta está pendente e exige uma nota não nula e não negativa quando está avaliada. Zero é válido. A aplicação complementa esta restrição ao rejeitar valores não finitos. Não existe uma cotação máxima configurada.
 
 Não existe uma chave `assignment_id` em `QuestionCorrection`. O professor é obtido pelo par formado pelo exame da origem e pela questão da resposta. Isto permite que uma atribuição posterior ao upload passe a aplicar-se às respostas já guardadas. Como a associação é consultada desta forma, a aplicação bloqueia a troca de professor após a primeira correção desse exame/questão, preservando a interpretação das avaliações existentes.
 
 ## 7. Execução
 
-Na raiz do repositório, criar um ambiente virtual e instalar as dependências dos quatro serviços. Os comandos seguintes destinam-se ao PowerShell.
+Na raiz, criar um ambiente virtual e instalar as dependências dos quatro serviços. Os comandos seguintes destinam-se ao PowerShell.
 
 ```powershell
 python -m venv venv
@@ -349,12 +349,12 @@ O Correction não valida os exames no Admin nem os professores no User. A atribu
 
 ### 8.2. Documentação
 
-O conteúdo funcional e operacional foi consolidado a partir dos seguintes ficheiros do repositório:
+O conteúdo funcional e operacional foi consolidado nos seguintes ficheiros:
 
-- `README.md`: arquitetura geral, funcionalidades, execução, testes, limpeza e âmbito.
+- `README.md`: arquitetura geral, funcionalidades, execução e âmbito.
 - `user_service/README.md`: gestão de utilizadores e papéis, regras de CSV, dados e validações.
 - `admin_service/README.md`: agendamento, inscrições, bloqueios por data e pedidos XML-RPC.
 - `printing_service/README.md`: contrato de impressão, estabilidade de QR codes, PDFs e recuperação.
 - `correction_service/README.md`: atribuições, digitalizações, processamento e correção.
 
-Os ficheiros `user_data.py`, `admin_data.py`, `printing_data.py` e `correction_data.py` foram usados para completar a identificação das classes SQLAlchemy, campos, relações e restrições. A contagem e os resultados dos testes foram confirmados no estado do projeto usado para gerar este documento.
+Os ficheiros `user_data.py`, `admin_data.py`, `printing_data.py` e `correction_data.py` foram usados para completar a identificação das classes SQLAlchemy, campos, relações e restrições.

@@ -15,13 +15,13 @@
             <td>{{ exam.course }}</td>
             <td class="actions">
               {% if exam.date < today %}
-                <span>Enrollment and printing closed</span>
+                <span>Enrollment closed</span>
               {% else %}
                 <a href="{{ url_for('enroll_students', exam_id=exam.id) }}">Enroll students</a>
-                <form method="post" action="{{ url_for('order_printing', exam_id=exam.id) }}">
-                  <button type="submit">Order printing</button>
-                </form>
               {% endif %}
+              <form method="post" action="{{ url_for('order_printing', exam_id=exam.id) }}">
+                <button type="submit">Order printing</button>
+              </form>
             </td>
           </tr>
         {% endfor %}

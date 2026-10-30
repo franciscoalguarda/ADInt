@@ -5,7 +5,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
-from xmlrpc.client import Fault, dumps, loads
+from xmlrpc.client import dumps, loads
 
 import pymupdf
 
@@ -175,28 +175,30 @@ class AdminPrintingIntegrationTests(unittest.TestCase):
         self.assertEqual({student: updated_ids[student] for student in original_ids}, original_ids)
 
     '''
-        Verify that Admin blocks late enrollment and printing without RPC calls,
-        and direct XML-RPC also rejects late printing while preserving the PDF and IDs.
+        Verify that late enrollment is blocked while Admin and direct XML-RPC
+        can reprint the same PDF without changing its bytes or sheet identifiers.
     '''
-    def test_past_exam_cannot_be_printed_by_admin_or_direct_xmlrpc(self):
+    def test_past_exam_can_be_reprinted_while_enrollment_stays_closed(self):
         self.enroll([10, 20])
         self.client.post("/exams/1/order-printing")
         original = self.snapshot()
         calls = len(self.proxy.calls)
         with patch.object(self.admin_module, "date", wraps=date) as admin_date:
             admin_date.today.return_value = self.exam_date + timedelta(days=1)
-            response = self.client.post("/exams/1/order-printing")
-            enrollment_response = self.enroll([30])
-        self.assertEqual(response.status_code, 200)
+            with patch(f"{create_printing_app.__module__}.date", wraps=date) as printing_date:
+                printing_date.today.return_value = self.exam_date + timedelta(days=1)
+                enrollment_response = self.enroll([30])
+                self.assertEqual(len(self.proxy.calls), calls)
+                response = self.client.post("/exams/1/order-printing")
+                self.assertEqual(len(self.proxy.calls), calls + 1)
+                self.assertEqual(self.snapshot(), original)
+                self.proxy.print_exam("1", self.exam_date.isoformat(), "Algorithms", ["10", "20"])
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(enrollment_response.status_code, 409)
         self.assertIn(b"Students cannot be enrolled after the exam date.", enrollment_response.data)
-        self.assertIn(b"cannot be printed after the exam date", response.data)
-        self.assertEqual(len(self.proxy.calls), calls)
-        with patch(f"{create_printing_app.__module__}.date", wraps=date) as printing_date:
-            printing_date.today.return_value = self.exam_date + timedelta(days=1)
-            with self.assertRaises(Fault):
-                self.proxy.print_exam("1", self.exam_date.isoformat(), "Algorithms", ["10", "20", "30"])
+        self.assertEqual(len(self.proxy.calls), calls + 2)
         self.assertEqual(self.snapshot(), original)
+        self.assertEqual((self.root / "output" / "exam_1.pdf").read_bytes(), original[0])
 
 
 if __name__ == "__main__":

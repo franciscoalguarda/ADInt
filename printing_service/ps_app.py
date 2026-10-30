@@ -149,8 +149,6 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
             raise Fault(1, "exam_date must use the YYYY-MM-DD format.") from error
         if parsed_date.isoformat() != exam_date:
             raise Fault(1, "exam_date must use the YYYY-MM-DD format.")
-        if parsed_date < date.today():
-            raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
 
         if not isinstance(course, str) or not course.strip():
             raise Fault(1, "course is required.")
@@ -181,8 +179,6 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
                     )
                     session.add(exam)
                 else:
-                    if exam.exam_date < date.today():
-                        raise Fault(1, "Resolution sheets cannot be printed after the exam date.")
                     changed = exam.exam_date != parsed_date or exam.course != course
                     exam.exam_date = parsed_date
                     exam.course = course
@@ -274,7 +270,8 @@ def create_app(database_url=None, output_dir=None, template_path=DEFAULT_TEMPLAT
         return send_file(
             BytesIO(contents),
             mimetype="application/pdf",
-            download_name=f"exam_{exam_id}.pdf",
+            download_name=f"exam_{exam_id}.pdf", 
+            # Add as_attachment=True to save in directly to Downloads or with file explorer
         )
 
     @app.post("/exams/<int:exam_id>/pdf/save")

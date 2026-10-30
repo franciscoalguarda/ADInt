@@ -268,24 +268,32 @@ class PrintingServiceTests(unittest.TestCase):
             self.assertEqual(len(set(ids.values())), 4)
 
     '''
-        Verify that printing is allowed on the exam date but later requests
-        are rejected, even with a future replacement date, preserving existing data.
+        Verify that past dates allow first printing and updates, while repeated
+        orders preserve the PDF bytes and existing sheet identifiers.
     '''
-    def test_printing_is_allowed_today_and_rejected_after_the_exam_date(self):
+    def test_printing_after_exam_date_preserves_reprints_and_allows_generation(self):
         module_name = create_app.__module__
         with patch(f"{module_name}.date", wraps=date) as server_date:
             server_date.today.return_value = self.exam_date
             self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
             original_pdf = self.client.get("/exams/12/pdf").data
+            with self.app.extensions["printing_session_factory"]() as session:
+                original_id = session.get(PrintedExam, 12).sheets[0].id
             server_date.today.return_value = self.exam_date + timedelta(days=1)
-            for identifier, supplied_date in ((12, self.exam_date), (13, self.exam_date), (12, self.exam_date + timedelta(days=7))):
-                with self.subTest(exam_id=identifier, supplied_date=supplied_date):
-                    with self.assertRaisesRegex(Fault, "cannot be printed after the exam date"):
-                        self.proxy.print_exam(identifier, supplied_date.isoformat(), "Algorithms", [10, 20])
-        self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+            self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10])
+            self.assertEqual(self.client.get("/exams/12/pdf").data, original_pdf)
+            self.assertEqual((self.output_dir / "exam_12.pdf").read_bytes(), original_pdf)
+            self.proxy.print_exam(13, self.exam_date.isoformat(), "Algorithms", [10, 20])
+            self.proxy.print_exam(12, self.exam_date.isoformat(), "Algorithms", [10, 20])
+        for exam_id in (12, 13):
+            with pymupdf.open(stream=self.client.get(f"/exams/{exam_id}/pdf").data, filetype="pdf") as document:
+                self.assertEqual(document.page_count, 8)
         with self.app.extensions["printing_session_factory"]() as session:
-            self.assertIsNone(session.get(PrintedExam, 13))
-            self.assertEqual([sheet.student_id for sheet in session.get(PrintedExam, 12).sheets], [10])
+            sheets = {sheet.student_id: sheet.id for sheet in session.get(PrintedExam, 12).sheets}
+            self.assertEqual(set(sheets), {10, 20})
+            self.assertEqual(sheets[10], original_id)
+            self.assertEqual(session.get(PrintedExam, 12).exam_date, self.exam_date)
+            self.assertEqual(session.get(PrintedExam, 13).exam_date, self.exam_date)
 
     '''
         Verify that failing to publish an expanded PDF raises an XML-RPC fault,

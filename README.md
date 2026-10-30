@@ -81,8 +81,9 @@ Modelos SQLAlchemy em `admin_service/admin_data.py`: `Exam` e `Enrollment`.
 Inscrever alunos apenas guarda as inscrições. A ação `Order printing` gera
 ou atualiza o PDF com todos os alunos inscritos nesse momento, através de
 `print_exam` por XML-RPC.
-Inscrições e impressão são bloqueadas após a data do exame; o próprio dia
-continua permitido. O CSV aceita apenas uma coluna de identificação, `student_id`
+As inscrições são bloqueadas após a data do exame; o próprio dia continua
+permitido. Os pedidos de impressão continuam disponíveis depois dessa data.
+O CSV aceita apenas uma coluna de identificação, `student_id`
 ou `student_identifier`.
 
 ### Printing Service
@@ -95,8 +96,8 @@ identificador único em QR code, igual nas suas quatro páginas. A página web
 lista os exames impressos e disponibiliza os PDFs.
 Pedidos repetidos preservam as folhas e os QR codes existentes. Num novo pedido
 de impressão, novos alunos acrescentam quatro páginas cada um ao PDF; pedidos antigos não
-removem alunos já incluídos. A impressão também é bloqueada por data no
-próprio endpoint XML-RPC.
+removem alunos já incluídos. O endpoint XML-RPC permite gerar e voltar a imprimir
+as folhas mesmo depois da data do exame.
 
 | Endpoint | Métodos | Funcionalidade |
 | --- | --- | --- |

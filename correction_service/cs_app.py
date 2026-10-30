@@ -315,7 +315,7 @@ def create_app(database_url=None):
                         pdf_file=contents,
                     )
                     source.corrections = [QuestionCorrection(
-                        page_number=index + 1, sheet_number=index // 4 + 1,
+                        sheet_number=index // 4 + 1,
                         question_number=index % 4 + 1,
                         page_pdf_file=pdf, page_png_file=png,
                     ) for index, (pdf, png) in enumerate(pages)]
@@ -335,7 +335,11 @@ def create_app(database_url=None):
         ).outerjoin(ProfessorAssignment, (
             (ProfessorAssignment.exam_id == ExamCorrectionPdf.exam_id)
             & (ProfessorAssignment.question_number == QuestionCorrection.question_number)
-        )).order_by(ExamCorrectionPdf.id, QuestionCorrection.page_number)
+        )).order_by(
+            ExamCorrectionPdf.id,
+            QuestionCorrection.sheet_number,
+            QuestionCorrection.question_number,
+        )
         if evaluated is not None:
             query = query.where(QuestionCorrection.evaluated.is_(evaluated))
         with Session() as session:

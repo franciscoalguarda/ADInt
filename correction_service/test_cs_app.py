@@ -13,7 +13,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 import pymupdf
-from sqlalchemy import event, select
+from sqlalchemy import event, inspect, select
 from sqlalchemy.exc import IntegrityError
 
 with patch.dict(os.environ, {"CORRECTION_DATABASE_URL": "sqlite:///:memory:"}):
@@ -449,7 +449,9 @@ class CorrectionServiceTests(unittest.TestCase):
         with self.session_factory() as session:
             source = session.get(ExamCorrectionPdf, 1)
             answers = session.scalars(
-                select(QuestionCorrection).order_by(QuestionCorrection.page_number)
+                select(QuestionCorrection).order_by(
+                    QuestionCorrection.sheet_number, QuestionCorrection.question_number
+                )
             ).all()
             self.assertEqual(source.exam_id, 81001)
             self.assertEqual(source.filename, "scan.pdf")
@@ -472,6 +474,71 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/scans/1/original.pdf").status_code, 200
         )
+
+    '''
+        Verify that only sheet and question positions are stored, while multiple
+        sheets remain ordered and their derived page numbers appear in the UI.
+    '''
+    def test_multiple_sheets_use_normalized_positions_and_derived_page_numbers(self):
+        columns = inspect(self.app.extensions["correction_engine"]).get_columns(
+            "question_corrections"
+        )
+        self.assertNotIn("page_number", {column["name"] for column in columns})
+        self.assertEqual(self.upload_pdf(self.make_pdf(8)).status_code, 302)
+        with self.session_factory() as session:
+            answers = session.scalars(select(QuestionCorrection).order_by(
+                QuestionCorrection.sheet_number, QuestionCorrection.question_number
+            )).all()
+            self.assertEqual(
+                [(answer.sheet_number, answer.question_number) for answer in answers],
+                [(sheet, question) for sheet in (1, 2) for question in range(1, 5)],
+            )
+            self.assertEqual([answer.page_number for answer in answers], list(range(1, 9)))
+            answer_id = answers[5].id
+        for path in ("/answers", "/scans"):
+            listing = self.client.get(path).data
+            positions = [listing.index(
+                f"<td>1 / {answer.sheet_number} / {answer.page_number}</td>".encode()
+            ) for answer in answers]
+            self.assertEqual(positions, sorted(positions))
+        self.assign_professor(question_number=2)
+        response = self.client.get(f"/answers/{answer_id}/correct")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"sheet 2, page 6.", response.data)
+
+    '''
+        Verify that a scan cannot contain the same sheet/question twice, while
+        the same question on other sheets or scans is valid and positions are checked.
+    '''
+    def test_answer_location_is_unique_per_scan_and_validated(self):
+        def answer(sheet, question):
+            return QuestionCorrection(
+                sheet_number=sheet, question_number=question,
+                page_pdf_file=b"pdf", page_png_file=b"png",
+            )
+
+        with self.session_factory.begin() as session:
+            source = ExamCorrectionPdf(
+                exam_id=81001, filename="scan.pdf", pdf_file=b"pdf",
+                corrections=[answer(1, 2), answer(2, 2)],
+            )
+            other_source = ExamCorrectionPdf(
+                exam_id=81001, filename="other.pdf", pdf_file=b"pdf",
+                corrections=[answer(1, 2)],
+            )
+            session.add_all([source, other_source])
+            session.flush()
+            source_id = source.id
+
+        for sheet, question in ((1, 2), (0, 1), (1, 0), (1, 5)):
+            with self.subTest(sheet=sheet, question=question):
+                with self.assertRaises(IntegrityError):
+                    with self.session_factory.begin() as session:
+                        duplicate_or_invalid = answer(sheet, question)
+                        duplicate_or_invalid.exam_correction_pdf_id = source_id
+                        session.add(duplicate_or_invalid)
+        with self.session_factory() as session:
+            self.assertEqual(len(session.scalars(select(QuestionCorrection.id)).all()), 3)
 
     '''
         Verify that processing pages rotated by 0, 90, 180, and 270 degrees
@@ -510,7 +577,9 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/scans/1/original.pdf").data, contents)
         with self.session_factory() as session:
             answers = session.scalars(
-                select(QuestionCorrection).order_by(QuestionCorrection.page_number)
+                select(QuestionCorrection).order_by(
+                    QuestionCorrection.sheet_number, QuestionCorrection.question_number
+                )
             ).all()
             self.assertEqual(len(answers), 4)
             for answer, original_image, rotation in zip(answers, original_images, rotations):
@@ -543,7 +612,8 @@ class CorrectionServiceTests(unittest.TestCase):
         with self.session_factory() as session:
             self.assertEqual(
                 session.scalar(select(QuestionCorrection.id).order_by(
-                    QuestionCorrection.page_number.desc()
+                    QuestionCorrection.sheet_number.desc(),
+                    QuestionCorrection.question_number.desc(),
                 )),
                 4,
             )
@@ -609,7 +679,9 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertEqual(self.upload_pdf(contents).status_code, 302)
         self.assertEqual(self.client.get("/scans/1/original.pdf").data, contents)
         with self.session_factory() as session:
-            answers = session.scalars(select(QuestionCorrection).order_by(QuestionCorrection.page_number)).all()
+            answers = session.scalars(select(QuestionCorrection).order_by(
+                QuestionCorrection.sheet_number, QuestionCorrection.question_number
+            )).all()
             self.assertEqual(len(answers), 4)
             for answer in answers:
                 png = cv2.imdecode(np.frombuffer(answer.page_png_file, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
@@ -888,7 +960,7 @@ class CorrectionServiceTests(unittest.TestCase):
         with self.session_factory.begin() as session:
             source = ExamCorrectionPdf(id=identifier, exam_id=81001, filename="scan.pdf", pdf_file=pdf)
             source.corrections = [QuestionCorrection(
-                id=identifier, page_number=1, sheet_number=1, question_number=1,
+                id=identifier, sheet_number=1, question_number=1,
                 page_pdf_file=pdf, page_png_file=png,
             )]
             session.add(source)
