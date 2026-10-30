@@ -190,14 +190,14 @@ def create_app():
     app = Flask(__name__)
     database_path = Path(__file__).resolve().with_name("corrections.sqlite")
     app.config.update(
-        DATABASE_URL=os.environ.get(
+        DATABASE_URL = os.environ.get(
             "CORRECTION_DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
         ),
-        MAX_CONTENT_LENGTH=50 * 1024 * 1024,
+        MAX_CONTENT_LENGTH = 50 * 1024 * 1024,
     )
     engine = create_engine(
         app.config["DATABASE_URL"],
-        connect_args={"check_same_thread": False}
+        connect_args = {"check_same_thread": False}
         if app.config["DATABASE_URL"].startswith("sqlite") else {},
     )
     if engine.dialect.name == "sqlite":

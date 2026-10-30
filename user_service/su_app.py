@@ -21,6 +21,7 @@ if path.exists(DATABASE_FILE):
 
 engine = create_engine(os.environ.get("USER_DATABASE_URL", 'sqlite:///%s'%(DATABASE_FILE)), echo=False)
 
+# Force foreign key constraints verification in SQLite
 @event.listens_for(engine, "connect")
 def enable_foreign_keys(connection, _):
     connection.execute("PRAGMA foreign_keys=ON")
@@ -82,7 +83,7 @@ def validate_user_id(value):
     except (TypeError, ValueError) as error:
         raise ValueError("invalid_id") from error
 
-    # Validação que é um inteiro positivo, único e não superior ao valor máximo de 64 bits (2^63 - 1)
+    # Validate that the identifier is a unique positive integer within the signed 64-bit range (2^63 - 1).
     if user_id <= 0 or user_id > 2**63 - 1:
         raise ValueError("invalid_id_range")
 

@@ -21,6 +21,7 @@ DEFAULT_DATABASE_PATH = Path(__file__).resolve().with_name("printing.sqlite")
 DEFAULT_TEMPLATE_PATH = Path(__file__).resolve().with_name("Exam-template.pdf")
 
 
+# Convert a decimal string or integer into a valid positive 64-bit identifier.
 def parse_identifier(value, label):
     message = f"{label} must be a positive 64-bit integer."
     if isinstance(value, str) and value.isascii() and value.isdecimal():
@@ -37,6 +38,7 @@ def parse_identifier(value, label):
     return value
 
 
+# Create the database engine and configure SQLite connection settings.
 def create_database_engine(database_url):
     engine = create_engine(
         database_url,
@@ -45,12 +47,14 @@ def create_database_engine(database_url):
         else {},
     )
     if engine.dialect.name == "sqlite":
+        # Enable foreign key checks for every new SQLite connection.
         @event.listens_for(engine, "connect")
         def enable_foreign_keys(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
     return engine
 
 
+# Add the resolution sheet's identifier as a QR code in all four page corners.
 def add_qr_code(page, identifier):
     image = qrcode.make(str(identifier))
     image_data = BytesIO()
@@ -73,6 +77,7 @@ def add_qr_code(page, identifier):
         )
 
 
+# Generate four question pages per resolution sheet, each marked with its QR code.
 def create_exam_pdf(template_path, sheet_ids):
     with pymupdf.open(template_path) as template:
         if template.page_count < 5:
@@ -91,6 +96,7 @@ def create_exam_pdf(template_path, sheet_ids):
             document.close()
 
 
+# Save the PDF through a temporary file to avoid leaving a partially written copy.
 def write_pdf_copy(output_dir, exam_id, contents):
     output_dir = Path(output_dir)
     output_path = output_dir / f"exam_{exam_id}.pdf"
@@ -110,6 +116,7 @@ def write_pdf_copy(output_dir, exam_id, contents):
     return output_path
 
 
+# Retrieve a printed exam or return HTTP 404 if its identifier is invalid or not found.
 def get_exam_or_404(session, exam_id):
     if not 0 < exam_id <= MAX_IDENTIFIER:
         abort(404)
@@ -119,6 +126,7 @@ def get_exam_or_404(session, exam_id):
     return exam
 
 
+# Restore the saved PDF from the database, or remove it if no committed exam exists.
 def restore_committed_pdf(output_dir, exam_id, session_factory):
     # Read under a fresh write lock so recovery cannot overwrite a newer order.
     with session_factory.begin() as session:
@@ -131,9 +139,11 @@ def restore_committed_pdf(output_dir, exam_id, session_factory):
             write_pdf_copy(output_dir, exam_id, exam.pdf_file)
 
 
+# Build the printing function using the configured output folder and database sessions.
 def create_print_exam(output_dir, session_factory):
     output_dir = Path(output_dir)
 
+    # Validate the order, add new resolution sheets, and generate and save the exam PDF.
     def print_exam(exam_id, exam_date, course, student_ids):
         exam_id = parse_identifier(exam_id, "exam_id")
 
@@ -204,6 +214,7 @@ def create_print_exam(output_dir, session_factory):
     return print_exam
 
 
+# Create and configure the Flask application, database, XML-RPC handler, and web routes.
 def create_app():
     app = Flask(__name__)
     database_path = DEFAULT_DATABASE_PATH
@@ -222,6 +233,7 @@ def create_app():
         app.config["OUTPUT_DIR"], session_factory
     )
 
+    # Handle XML-RPC printing requests and convert unexpected failures into generic faults.
     def handle_print_exam(*args):
         try:
             return print_exam(*args)
@@ -236,11 +248,13 @@ def create_app():
     xmlrpc_handler.connect(app, "/RPC2")
     xmlrpc_handler.connect(app, "/", endpoint_name="printing_xmlrpc_root")
 
+    # Display the list of printed exams from either listing route.
     @app.get("/")
     @app.get("/exams")
     def list_exams():
         return render_exams()
 
+    # Load exams and their sheet counts and render any error or success message.
     def render_exams(error=None, success=None):
         with session_factory() as session:
             exams = session.scalars(
@@ -255,6 +269,7 @@ def create_app():
             ]
         return render_template("index.html", exams=rows, error=error, success=success)
 
+    # Send the stored exam PDF to the browser for viewing.
     @app.get("/exams/<int:exam_id>/pdf")
     def view_exam_pdf(exam_id):
         with session_factory() as session:
@@ -267,6 +282,7 @@ def create_app():
             # Add as_attachment=True to save in directly to Downloads or with file explorer
         )
 
+    # Save the stored exam PDF to the output folder while preventing conflicting writes.
     @app.post("/exams/<int:exam_id>/pdf/save")
     def save_exam_pdf(exam_id):
         try:
@@ -281,6 +297,7 @@ def create_app():
             return render_exams(error="Could not save the PDF to the output folder. Please try again."), 500
         return redirect(url_for("save_pdf_success"))
 
+    # Display the exam list with confirmation that the PDF was saved.
     @app.get("/exams/pdf/saved")
     def save_pdf_success():
         return render_exams(success="PDF saved to the output folder.")
@@ -288,6 +305,7 @@ def create_app():
     return app
 
 
+# Create the threaded server that handles both web pages and XML-RPC requests.
 def create_server(host="127.0.0.1", port=5003):
     return make_server(host, port, create_app(), threaded=True)
 

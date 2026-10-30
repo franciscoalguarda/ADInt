@@ -19,10 +19,12 @@ MAX_IDENTIFIER = 2**63 - 1
 
 
 class TimeoutTransport(Transport):
+    # Store the timeout used for HTTP connections to the Printing Service.
     def __init__(self, timeout):
         super().__init__()
         self.timeout = timeout
 
+    # Apply the configured timeout to the HTTP connection.
     def make_connection(self, host):
         connection = super().make_connection(host)
         connection.timeout = self.timeout
@@ -30,16 +32,19 @@ class TimeoutTransport(Transport):
 
 
 class TimeoutSafeTransport(SafeTransport):
+    # Store the timeout used for HTTPS connections to the Printing Service.
     def __init__(self, timeout):
         super().__init__()
         self.timeout = timeout
 
+    # Apply the configured timeout to the HTTPS connection.
     def make_connection(self, host):
         connection = super().make_connection(host)
         connection.timeout = self.timeout
         return connection
 
 
+# Convert an error code into a message and fill in any additional details.
 def get_error_message(reason, **details):
     messages = {
         "missing_course": "Course is required.",
@@ -69,6 +74,7 @@ def get_error_message(reason, **details):
     return messages.get(reason, "Could not complete the operation.").format(**details)
 
 
+# Retrieve an exam or return HTTP 404 if its identifier is invalid or not found.
 def get_exam_or_404(session, exam_id):
     if not 0 < exam_id <= MAX_IDENTIFIER:
         abort(404)
@@ -78,13 +84,14 @@ def get_exam_or_404(session, exam_id):
     return exam
 
 
+# Reserve the SQLite write lock before checking and adding enrollments.
 def begin_sqlite_write(session):
     if session.bind.dialect.name == "sqlite":
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
 
 
+# Create and configure the Flask application, database, and service routes.
 def create_app():
-    """Configure the Flask app, its database, and the Admin Service routes."""
     app = Flask(__name__)
 
     # Read deployment settings, using independent local defaults.
@@ -105,6 +112,7 @@ def create_app():
         else {},
     )
     if engine.dialect.name == "sqlite":
+        # Enable foreign key checks for every new SQLite connection.
         @event.listens_for(engine, "connect")
         def enable_foreign_keys(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
@@ -112,6 +120,7 @@ def create_app():
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
+    # Display the home page with the total numbers of exams and enrollments.
     @app.route("/")
     def index():
         with session_factory() as session:
@@ -125,6 +134,7 @@ def create_app():
             enrollment_count=enrollment_count,
         )
 
+    # Display the scheduling form and validate and save submitted exams.
     @app.route("/exams/schedule", methods=["GET", "POST"])
     def schedule_exam():
         error_message = None
@@ -153,11 +163,12 @@ def create_app():
 
         return render_template("scheduleExam.html", error=error_message)
 
+    # Display the list of exams in chronological order.
     @app.route("/exams")
     def list_exams():
-        # List exams in chronological order.
         return render_exams()
 
+    # Load exams in chronological order and render any error or success message.
     def render_exams(error=None, success=None):
         with session_factory() as session:
             exams = session.scalars(
@@ -166,14 +177,17 @@ def create_app():
         return render_template("listExams.html", exams=exams, error=error, success=success,
                                today=date.today())
 
+    # Display the exam list with confirmation that an exam was scheduled.
     @app.get("/exams/success")
     def exams_success():
         return render_exams(success="Exam scheduled successfully.")
 
+    # Display the exam list with confirmation that the printing order was sent.
     @app.get("/exams/printing/success")
     def printing_order_success():
         return render_exams(success="Printing order sent successfully.")
 
+    # Import new student enrollments from CSV, blocking exams with a past date.
     @app.route("/exams/<int:exam_id>/enroll", methods=["GET", "POST"])
     def enroll_students(exam_id):
         with session_factory() as session:
@@ -280,11 +294,12 @@ def create_app():
 
         return render_template("enrollStudents.html", exam=exam, error=error_message)
 
+    # Display each enrollment alongside the corresponding exam details.
     @app.route("/enrollments")
     def list_enrollments():
-        # Show each enrollment alongside the corresponding exam details.
         return render_enrollments()
 
+    # Join enrollments with their exams and render the enrollment list.
     def render_enrollments(success=None):
         with session_factory() as session:
             rows = session.execute(
@@ -298,6 +313,7 @@ def create_app():
         ]
         return render_template("listEnrollments.html", enrollments=enrollments, success=success)
 
+    # Display the enrollment list with a message about the imported students.
     @app.get("/enrollments/success")
     def enrollments_success():
         count = request.args.get("count", type=int)
@@ -308,15 +324,16 @@ def create_app():
             success = f"{count} student(s) enrolled successfully."
         return render_enrollments(success=success)
 
+    # Submit a printing order and display an error or redirect to confirmation.
     @app.post("/exams/<int:exam_id>/order-printing")
     def order_printing(exam_id):
-        # Send the exam and enrolled student IDs to the Printing Service via XML-RPC.
         try:
             send_printing_order(exam_id)
         except ValueError as error:
             return render_exams(error=get_error_message(str(error)))
         return redirect(url_for("printing_order_success"))
 
+    # Send exam data via XML-RPC, retrying up to three times if enrollments change.
     def send_printing_order(exam_id):
         for _ in range(3):
             with session_factory() as session:
@@ -351,6 +368,7 @@ def create_app():
                 return True
         raise ValueError("printing_changed")
 
+    # Render the service's error page when a requested resource is not found.
     @app.errorhandler(404)
     def not_found(_):
         return render_template("notFound.html"), 404
