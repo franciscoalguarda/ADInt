@@ -12,10 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.utils import secure_filename
 
-if __package__:
-    from .correction_data import Base, ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
-else:
-    from correction_data import Base, ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
+from correction_data import Base, ExamCorrectionPdf, ProfessorAssignment, QuestionCorrection
 
 
 def split_pdf_into_pages(document: pymupdf.Document) -> list[pymupdf.Document]:
@@ -189,11 +186,11 @@ def get_error_message(reason):
     return messages.get(reason, "Could not complete the operation.")
 
 
-def create_app(database_url=None):
+def create_app():
     app = Flask(__name__)
     database_path = Path(__file__).resolve().with_name("corrections.sqlite")
     app.config.update(
-        DATABASE_URL=database_url or os.environ.get(
+        DATABASE_URL=os.environ.get(
             "CORRECTION_DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
         ),
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,
@@ -210,8 +207,6 @@ def create_app(database_url=None):
 
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
-    app.extensions["correction_engine"] = engine
-    app.extensions["correction_session_factory"] = Session
 
     def get_correction_summary():
         with Session() as session:

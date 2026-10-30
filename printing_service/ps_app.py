@@ -13,10 +13,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from werkzeug.serving import make_server
 
-if __package__:
-    from .printing_data import Base, PrintedExam, ResolutionSheet
-else:
-    from printing_data import Base, PrintedExam, ResolutionSheet
+from printing_data import Base, PrintedExam, ResolutionSheet
 
 
 MAX_IDENTIFIER = 2**63 - 1
@@ -134,9 +131,8 @@ def restore_committed_pdf(output_dir, exam_id, session_factory):
             write_pdf_copy(output_dir, exam_id, exam.pdf_file)
 
 
-def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLATE_PATH):
+def create_print_exam(output_dir, session_factory):
     output_dir = Path(output_dir)
-    template_path = Path(template_path)
 
     def print_exam(exam_id, exam_date, course, student_ids):
         exam_id = parse_identifier(exam_id, "exam_id")
@@ -191,7 +187,7 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
                 session.flush()
                 if changed or not exam.pdf_file:
                     exam.pdf_file = create_exam_pdf(
-                        template_path, [sheet.id for sheet in exam.sheets]
+                        DEFAULT_TEMPLATE_PATH, [sheet.id for sheet in exam.sheets]
                     )
 
                 # Publish while holding the write lock, then restore committed
@@ -208,25 +204,22 @@ def create_print_exam(output_dir, session_factory, template_path=DEFAULT_TEMPLAT
     return print_exam
 
 
-def create_app(database_url=None, output_dir=None, template_path=DEFAULT_TEMPLATE_PATH):
+def create_app():
     app = Flask(__name__)
     database_path = DEFAULT_DATABASE_PATH
     app.config.update(
-        DATABASE_URL=database_url or os.environ.get(
+        DATABASE_URL=os.environ.get(
             "PRINTING_DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
         ),
-        OUTPUT_DIR=output_dir or os.environ.get(
+        OUTPUT_DIR=os.environ.get(
             "PRINTING_OUTPUT_DIR", Path(__file__).resolve().parent / "output"
         ),
-        TEMPLATE_PATH=template_path,
     )
     engine = create_database_engine(app.config["DATABASE_URL"])
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    app.extensions["printing_engine"] = engine
-    app.extensions["printing_session_factory"] = session_factory
     print_exam = create_print_exam(
-        app.config["OUTPUT_DIR"], session_factory, app.config["TEMPLATE_PATH"]
+        app.config["OUTPUT_DIR"], session_factory
     )
 
     def handle_print_exam(*args):
@@ -295,11 +288,8 @@ def create_app(database_url=None, output_dir=None, template_path=DEFAULT_TEMPLAT
     return app
 
 
-def create_server(host="127.0.0.1", port=5003, output_dir=None, database_url=None):
-    app = create_app(database_url=database_url, output_dir=output_dir)
-    server = make_server(host, port, app, threaded=True)
-    server.app = app
-    return server
+def create_server(host="127.0.0.1", port=5003):
+    return make_server(host, port, create_app(), threaded=True)
 
 
 if __name__ == "__main__":

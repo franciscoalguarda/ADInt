@@ -93,16 +93,3 @@ Configuração opcional:
 - `PRINTING_OUTPUT_DIR`: diretoria para a cópia dos PDFs gerados.
 
 Reiniciar o Admin e o Printing Service depois de atualizar o código.
-
-## Testes
-
-```powershell
-.\venv\Scripts\python.exe -m unittest discover -s printing_service -v
-```
-
-Os testes usam bases e diretórios temporários. Verificam a geração dos PDFs,
-os QR codes estáveis, pedidos repetidos e simultâneos, a impressão após o exame e
-as falhas na escrita da cópia. Os testes cobrem também falhas na confirmação da
-transação e a recuperação da cópia de output. `test_admin_printing.py` testa os
-dois serviços com o protocolo XML-RPC real, incluindo a preservação do PDF após novas inscrições
-e a atualização de oito para dezasseis páginas apenas após um novo pedido.

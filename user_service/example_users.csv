@@ -1,0 +1,6 @@
+id,name,password,role
+1001,Ana Silva,ExemploAdmin123!,Administrator
+1002,Bruno Costa,ExemploProf123!,Professor
+1003,Carla Santos,ExemploVigilante123!,Exam invigilator
+1004,Diogo Ferreira,ExemploAluno123!,Student
+1005,Eva Martins,ExemploMulti123!,Professor|Administrator

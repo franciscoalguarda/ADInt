@@ -78,13 +78,13 @@ Exemplo:
 
 ```csv
 id,name,password,role
-1001,Ana Silva,testeAna123,Student
-2001,João Pereira,testeJoao123,Professor|Exam invigilator
-3001,"Costa, Maria",testeMaria123,Exam invigilator
-4001,Pedro Santos,testePedro123,Administrator
+1001,Ana Silva,exemploAna123,Student
+2001,João Pereira,exemploJoao123,Professor|Exam invigilator
+3001,"Costa, Maria",exemploMaria123,Exam invigilator
+4001,Pedro Santos,exemploPedro123,Administrator
 ```
 
-Para testar:
+Para importar:
 
 1. Guarda o exemplo num ficheiro `.csv` com codificação UTF-8.
 2. Abre a página **Bulk Add Users**.
@@ -126,8 +126,7 @@ nem altera os dados dos existentes.
 Por omissão, o serviço utiliza o ficheiro SQLite `user_service/users.sqlite`.
 O caminho é calculado a partir da localização de `su_app.py`, independentemente
 da pasta a partir da qual o serviço é iniciado.
-`USER_DATABASE_URL` permite configurar outra ligação SQLAlchemy, incluindo
-uma base em memória para inicialização isolada durante os testes.
+`USER_DATABASE_URL` permite configurar outra ligação SQLAlchemy.
 
 As tabelas inexistentes e os papéis predefinidos são criados no arranque:
 
@@ -142,25 +141,6 @@ um utilizador tenha vários papéis e que um papel pertença a vários utilizado
 As chaves estrangeiras são ativadas em cada ligação SQLite, impedindo associações
 a utilizadores ou papéis inexistentes e a remoção direta de registos referenciados.
 
-## Testes
-
-```powershell
-.\venv\Scripts\python.exe -m unittest discover -s user_service -v
-```
-
-Os testes de criação e importação usam uma base de dados temporária.
-A importação inicial do módulo usa uma base em memória, sem criar ou modificar
-`user_service/users.sqlite`.
-Também são verificadas as contagens da página inicial, incluindo utilizadores
-com vários papéis, a preservação dos campos após erros e os redirecionamentos
-de sucesso.
-Os testes de importação verificam também a exclusão de IDs duplicados, a
-preservação dos dados existentes, a primeira ocorrência no CSV e a confirmação
-quando não há novos utilizadores. Conflitos de nome, papéis ou password com um
-CSV anterior rejeitam todo o lote novo e preservam os registos originais.
-São ainda verificadas as chaves estrangeiras e a rejeição de papéis em falta
-na base de dados, incluindo o rollback de toda a importação CSV.
-
 ## Estrutura
 
 - [su_app.py](su_app.py): configuração da aplicação, consultas, validação,
@@ -169,6 +149,5 @@ na base de dados, incluindo o rollback de toda a importação CSV.
   de associação `UserRoles`.
 - [templates/](templates/): páginas HTML e estrutura comum da aplicação.
 - [requirements.txt](requirements.txt): dependências Python do serviço.
-- [test_su_app.py](test_su_app.py): testes automatizados do serviço.
-- [test_users.csv](test_users.csv): exemplo de importação com cinco utilizadores,
+- [example_users.csv](example_users.csv): exemplo de importação com cinco utilizadores,
   incluindo um utilizador com vários papéis.

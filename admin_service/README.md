@@ -121,21 +121,3 @@ atualizar o PDF, é necessário que esteja disponível quando se carrega em
 inscrições atuais da base do Admin, incluindo após reiniciar o serviço.
 
 Reiniciar ambos os serviços depois de atualizar o código.
-
-## Testes
-
-```powershell
-.\venv\Scripts\python.exe -m unittest discover -s admin_service -v
-```
-
-Os testes usam bases de dados temporárias e simulam a comunicação XML-RPC.
-A aplicação criada ao importar o módulo de testes usa uma base em memória,
-sem criar nem modificar `admin_service/admin.sqlite`.
-Verificam validações, importação atómica das novas inscrições, exclusão de duplicados,
-contagem de novas inscrições, preservação dos campos, mensagens
-sem cookies, confirmações, IDs de 64 bits e integridade das inscrições.
-Também cobrem o bloqueio das inscrições por data, a impressão após o exame e apenas por pedido explícito,
-a independência das inscrições face ao Printing e a preservação da estrutura
-pedida para a base de dados. Os testes de integração entre
-Admin e Printing estão em `printing_service/test_admin_printing.py` e são
-executados com os testes do Printing Service.

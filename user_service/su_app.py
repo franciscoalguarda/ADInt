@@ -9,10 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from os import path
 from werkzeug.security import check_password_hash, generate_password_hash
 
-if __package__:
-    from .user_data import Role, User, Base
-else:
-    from user_data import Role, User, Base
+from user_data import Role, User, Base
 
 app = Flask(__name__)
 

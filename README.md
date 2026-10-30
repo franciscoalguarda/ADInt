@@ -138,45 +138,6 @@ associa a identidade do aluno à folha nem filtra listas por utilizador.
 Modelos SQLAlchemy em `correction_service/correction_data.py`:
 `ProfessorAssignment`, `ExamCorrectionPdf` e `QuestionCorrection`.
 
-## Testes
-
-Os testes usam bases de dados e diretórios temporários.
-As instâncias criadas ao importar os módulos de teste usam bases em memória,
-sem criar ou alterar os ficheiros SQLite normais dos serviços.
-
-```powershell
-.\venv\Scripts\python.exe -m unittest discover -s user_service -p "test*.py" -v
-.\venv\Scripts\python.exe -m unittest discover -s admin_service -p "test*.py" -v
-.\venv\Scripts\python.exe -m unittest discover -s printing_service -p "test*.py" -v
-.\venv\Scripts\python.exe -m unittest discover -s correction_service -p "test*.py" -v
-```
-
-## Limpar bases de dados, caches e PDFs gerados
-
-Parar os serviços que serão limpos e executar, na raiz do projeto:
-
-| Limpeza | Comando |
-| --- | --- |
-| Bases de dados, caches e output dos quatro serviços | `python clean.py` |
-| Apenas bases de dados dos quatro serviços | `python clean.py --databases-only` |
-| Bases de dados, caches e output de um serviço | `python clean.py --service NOME_DO_SERVICO` |
-| Apenas a base de dados de um serviço | `python clean.py --databases-only --service NOME_DO_SERVICO` |
-| Apenas a pasta `printing_service/output` | `python clean.py --output-only` |
-
-Substituir `NOME_DO_SERVICO` pelo *nome do serviço*: `user_service`,
-`admin_service`, `printing_service` ou `correction_service`.
-A opção `--service` pode ser repetida para selecionar vários serviços.
-Acrescentar `--dry-run` a qualquer comando para simular sem apagar ficheiros.
-
-A limpeza de bases de dados apaga os dados e os ficheiros auxiliares SQLite.
-As caches são as pastas `__pycache__`; o output aplica-se apenas ao Printing
-Service. `--output-only` preserva os PDFs guardados na base de dados e não pode
-ser combinado com `--databases-only` ou com outro serviço.
-
-O código, o ambiente virtual e o `Exam-template.pdf` são preservados.
-As bases de dados, caches e output são recriados quando necessários.
-Diretórios personalizados com `PRINTING_OUTPUT_DIR` não são limpos.
-
 ## Âmbito da Parte 1
 
 A Parte 1 não inclui autenticação, associação do aluno à folha pelo invigilador,

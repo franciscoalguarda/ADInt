@@ -104,7 +104,3 @@ Cada resposta guarda apenas `sheet_number` e `question_number` para identificar
 a sua posição. O trio upload/folha/questão é único. `page_number` é uma propriedade
 calculada por `(sheet_number - 1) * 4 + question_number`, sem coluna na base de
 dados. As listagens são ordenadas por upload, folha e questão.
-
-Os testes usam bases temporárias e inicializam o módulo com uma base em memória,
-sem criar nem modificar `correction_service/corrections.sqlite`. Incluem códigos
-QR repetidos do Printing Service e verificam cada canto das páginas PDF e PNG.

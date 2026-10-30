@@ -12,10 +12,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-if __package__:
-    from .admin_data import Base, Enrollment, Exam
-else:
-    from admin_data import Base, Enrollment, Exam
+from admin_data import Base, Enrollment, Exam
 
 
 MAX_IDENTIFIER = 2**63 - 1
@@ -86,16 +83,16 @@ def begin_sqlite_write(session):
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
 
 
-def create_app(database_url=None, printing_rpc_url=None):
+def create_app():
     """Configure the Flask app, its database, and the Admin Service routes."""
     app = Flask(__name__)
 
-    # Allow deployments and tests to override local defaults without sharing databases.
+    # Read deployment settings, using independent local defaults.
     database_path = Path(__file__).resolve().parent / "admin.sqlite"
-    app.config["DATABASE_URL"] = database_url or os.environ.get(
+    app.config["DATABASE_URL"] = os.environ.get(
         "ADMIN_DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
     )
-    app.config["PRINTING_RPC_URL"] = printing_rpc_url or os.environ.get(
+    app.config["PRINTING_RPC_URL"] = os.environ.get(
         "ADMIN_PRINTING_RPC_URL", "http://127.0.0.1:5003"
     )
     app.config["PRINTING_RPC_TIMEOUT"] = 30
@@ -113,14 +110,10 @@ def create_app(database_url=None, printing_rpc_url=None):
             connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
-    app.extensions["admin_session_factory"] = sessionmaker(
-        bind=engine, expire_on_commit=False
-    )
-    app.extensions["admin_engine"] = engine
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     @app.route("/")
     def index():
-        session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exam_count = session.scalar(select(func.count()).select_from(Exam))
             enrollment_count = session.scalar(
@@ -151,7 +144,6 @@ def create_app(database_url=None, printing_rpc_url=None):
                 if exam_date < date.today():
                     raise ValueError("past_exam_date")
 
-                session_factory = current_app.extensions["admin_session_factory"]
                 with session_factory.begin() as session:
                     session.add(Exam(date=exam_date, course=course))
             except ValueError as error:
@@ -167,7 +159,6 @@ def create_app(database_url=None, printing_rpc_url=None):
         return render_exams()
 
     def render_exams(error=None, success=None):
-        session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exams = session.scalars(
                 select(Exam).order_by(Exam.date, Exam.id)
@@ -185,7 +176,6 @@ def create_app(database_url=None, printing_rpc_url=None):
 
     @app.route("/exams/<int:exam_id>/enroll", methods=["GET", "POST"])
     def enroll_students(exam_id):
-        session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             exam = get_exam_or_404(session, exam_id)
 
@@ -296,7 +286,6 @@ def create_app(database_url=None, printing_rpc_url=None):
         return render_enrollments()
 
     def render_enrollments(success=None):
-        session_factory = current_app.extensions["admin_session_factory"]
         with session_factory() as session:
             rows = session.execute(
                 select(Enrollment, Exam)
@@ -329,7 +318,6 @@ def create_app(database_url=None, printing_rpc_url=None):
         return redirect(url_for("printing_order_success"))
 
     def send_printing_order(exam_id):
-        session_factory = current_app.extensions["admin_session_factory"]
         for _ in range(3):
             with session_factory() as session:
                 exam = get_exam_or_404(session, exam_id)
