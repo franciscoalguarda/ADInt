@@ -11,7 +11,6 @@ Francisco António Lisboa Guarda (117392)
 
 André Filipe Teigas Vaz (120181)
 
-Documento consolidado a partir do README geral e dos READMEs dos quatro serviços. Os modelos SQLAlchemy foram consultados para completar a descrição das classes e dos campos persistidos.
 
 ## 1. Enquadramento e arquitetura
 
@@ -34,7 +33,7 @@ O Admin Service comunica com o Printing Service por XML-RPC, no entanto, não ex
 
 As aplicações usam **Python**, **Flask**, **SQLAlchemy** e **SQLite**. O Printing Service disponibiliza o endpoint XML-RPC com **Flask-XML-RPC-Reloaded**, um fork compatível com Python 3. A geração e o processamento de PDFs usam **PyMuPDF**, os QR codes são gerados com **qrcode** e detetados no Correction Service com **OpenCV**, com apoio de **NumPy**. O User Service usa o Werkzeug para gerar e verificar hashes de passwords.
 
-Cada diretório de serviço contém a aplicação, o módulo de dados, os templates HTML, as dependências e os testes. Os ficheiros principais são `su_app.py`, `as_app.py`, `ps_app.py` e `cs_app.py`. Na raiz, `clean.py` concentra as operações de limpeza.
+Cada diretório de serviço contém a aplicação, o módulo de dados, os templates HTML e as dependências. Os ficheiros principais são `su_app.py`, `as_app.py`, `ps_app.py` e `cs_app.py`.
 
 ## 2. Funcionalidades implementadas
 

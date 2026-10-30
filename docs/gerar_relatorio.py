@@ -192,7 +192,7 @@ def cover(document):
     remainder = page.insert_textbox(
         pymupdf.Rect(48, 603, PAGE.width - 48, 735),
         "Descrição consolidada das funcionalidades implementadas, arquitetura, "
-        "endpoints, modelos de dados, regras de validação, execução e testes.",
+        "endpoints, modelos de dados, regras de validação e execução.",
         fontsize=11, lineheight=1.5, color=GRAY,
     )
     assert remainder >= 0, "Cover description does not fit"
