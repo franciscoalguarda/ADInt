@@ -122,7 +122,7 @@ As chaves estrangeiras são ativadas em cada ligação SQLite. Impedem associaç
 
 #### 3.3.4. Preparação para a Parte 2
 
-Esta organização permite que a futura autenticação reconheça uma única conta e que a autorização consulte todos os papéis dessa conta para determinar as funcionalidades disponíveis. Alterar uma atribuição passa por alterar a associação, sem duplicar a identidade ou as credenciais do utilizador. A estrutura prepara essa evolução; o controlo de acesso e a filtragem por utilizador continuam fora da implementação da Parte 1.
+Esta organização permite que a futura autenticação reconheça uma única conta e que a autorização consulte todos os papéis dessa conta para determinar as funcionalidades disponíveis. Alterar uma atribuição passa por alterar a associação, sem duplicar a identidade ou as credenciais do utilizador. A estrutura prepara essa evolução. O controlo de acesso e a filtragem por utilizador continuam fora da implementação da Parte 1.
 
 ## 4. Admin Service
 
@@ -132,7 +132,7 @@ O Admin Service agenda exames, importa inscrições de alunos, apresenta a infor
 
 O agendamento exige uma unidade curricular não vazia, com até 200 caracteres, e uma data igual ou posterior à data atual do servidor. O ID do exame é gerado pela base de dados. Nos URLs, exames inexistentes ou IDs fora do intervalo positivo de 64 bits devolvem HTTP 404.
 
-A inscrição aceita CSV UTF-8, com ou sem BOM, com uma coluna de identificação: `student_id` ou `student_identifier`. Os cabeçalhos são normalizados sem distinguir maiúsculas de minúsculas e têm de ser únicos. A presença simultânea das duas colunas de identificação é rejeitada. Colunas adicionais são permitidas quando declaradas no cabeçalho; vírgulas dentro de campos são aceites entre aspas.
+A inscrição aceita CSV UTF-8, com ou sem BOM, com uma coluna de identificação: `student_id` ou `student_identifier`. Os cabeçalhos são normalizados sem distinguir maiúsculas de minúsculas e têm de ser únicos. A presença simultânea das duas colunas de identificação é rejeitada. Colunas adicionais são permitidas quando declaradas no cabeçalho e vírgulas dentro de campos são aceites entre aspas.
 
 ```csv
 student_id
@@ -140,11 +140,11 @@ student_id
 1002
 ```
 
-IDs repetidos no CSV e alunos já inscritos nesse exame são ignorados. Um aluno inscrito noutro exame pode ser inscrito no exame selecionado. As novas inscrições são guardadas numa única transação; erros de estrutura ou de identificadores rejeitam o lote e identificam a linha quando aplicável. O Admin não valida os IDs de alunos na base do User Service.
+IDs repetidos no CSV e alunos já inscritos nesse exame são ignorados. Um aluno inscrito noutro exame pode ser inscrito no exame selecionado. As novas inscrições são guardadas numa única transação e erros de estrutura ou de identificadores rejeitam o lote e identificam a linha quando aplicável. O Admin não valida os IDs de alunos na base do User Service.
 
 A confirmação apresenta apenas o número de novas inscrições. Se não existir nenhuma, informa `No new students were enrolled.` com `count=0`. As inscrições existentes mantêm-se inalteradas.
 
-Depois da data do exame, inscrições e impressão são bloqueadas. No próprio dia continuam permitidas. A listagem oculta as ações quando estão encerradas; o formulário de inscrição de um exame passado devolve HTTP 409.
+Depois da data do exame, inscrições e impressão são bloqueadas. No próprio dia continuam permitidas. A listagem oculta as ações quando estão encerradas e o formulário de inscrição de um exame passado devolve HTTP 409.
 
 ### 4.2. Páginas e endpoints
 
@@ -167,13 +167,13 @@ Os modelos são definidos em `admin_service/admin_data.py`.
 | Modelo | Tabela | Campos persistidos |
 | --- | --- | --- |
 | `Exam` | `exams` | `id` (PK gerada), `date`, `course` |
-| `Enrollment` | `enrolled_students` | `exam_id` e `student_id` (PK composta); `exam_id` é FK |
+| `Enrollment` | `enrolled_students` | `exam_id` e `student_id` (PK composta), `exam_id` é FK |
 
 As chaves estrangeiras impedem inscrições em exames inexistentes. A eliminação de um exame elimina as respetivas inscrições em cascata.
 
 Inscrever alunos não contacta o Printing Service. A geração ou atualização de PDFs exige um pedido explícito com `Order printing`, que usa as inscrições persistidas nesse momento, incluindo depois de reiniciar o Admin. O Printing pode estar desligado durante a inscrição.
 
-As chamadas HTTP e HTTPS usam um timeout de 30 segundos para as operações de rede. Falhas de comunicação, rejeições, faults e respostas XML-RPC inválidas são traduzidas em mensagens próprias. Se as inscrições mudarem durante um pedido, o Admin volta a consultar a lista e pode repetir o envio até três tentativas; alterações contínuas originam uma mensagem para pedir novamente a atualização.
+As chamadas HTTP e HTTPS usam um timeout de 30 segundos para as operações de rede. Falhas de comunicação, rejeições, faults e respostas XML-RPC inválidas são traduzidas em mensagens próprias. Se as inscrições mudarem durante um pedido, o Admin volta a consultar a lista e pode repetir o envio até três tentativas. Alterações contínuas originam uma mensagem para pedir novamente a atualização.
 
 ## 5. Printing Service
 
@@ -188,7 +188,7 @@ print_exam(exam_id, exam_date, course, student_ids)
 | Argumento | Representação e validação |
 | --- | --- |
 | `exam_id` | Inteiro positivo ou texto decimal até `2**63 - 1` |
-| `exam_date` | Texto no formato `YYYY-MM-DD`; não pode estar no passado |
+| `exam_date` | Texto no formato `YYYY-MM-DD` e não pode estar no passado |
 | `course` | Texto não vazio |
 | `student_ids` | Lista não vazia de IDs válidos, sem repetições |
 
@@ -198,7 +198,7 @@ O Admin envia o ID do exame e os IDs de alunos como textos decimais para evitar 
 
 O modelo é `printing_service/Exam-template.pdf`. A página introdutória é omitida e as quatro páginas de questões são copiadas para cada aluno. Para `n` alunos, o resultado tem exatamente `4 × n` páginas.
 
-Cada folha tem um ID único, usado nos QR codes das suas quatro páginas. São colocados códigos nos quatro cantos de cada página. O ID da folha é distinto do identificador do aluno; a base mantém o par exame/aluno necessário para preservar a mesma folha em pedidos posteriores.
+Cada folha tem um ID único, usado nos QR codes das suas quatro páginas. São colocados códigos nos quatro cantos de cada página. O ID da folha é distinto do identificador do aluno. A base mantém o par exame/aluno necessário para preservar a mesma folha em pedidos posteriores.
 
 Repetir um pedido sem alterações reutiliza o PDF e os IDs existentes. Novos alunos acrescentam quatro páginas cada um. Listas antigas não removem alunos nem invalidam QR codes emitidos. Por exemplo, passar de dois para quatro alunos aumenta o PDF de oito para dezasseis páginas apenas depois de um novo pedido explícito.
 
@@ -233,7 +233,7 @@ O Correction Service recebe digitalizações, atribui professores a questões e 
 
 ### 6.1. Atribuição de professores
 
-Os IDs do exame e do professor são introduzidos manualmente e têm de ser positivos de 64 bits; as questões válidas são 1 a 4. A atribuição pode existir antes do carregamento das digitalizações. Não é feita uma consulta ao Admin para validar a existência do exame nem ao User para confirmar o papel do professor.
+Os IDs do exame e do professor são introduzidos manualmente e têm de ser positivos de 64 bits. As questões válidas são 1 a 4. A atribuição pode existir antes do carregamento das digitalizações. Não é feita uma consulta ao Admin para validar a existência do exame nem ao User para confirmar o papel do professor.
 
 Cada par exame/questão tem um professor, e cada professor pode assumir apenas uma questão por exame. O mesmo professor pode participar em exames diferentes. Antes de existirem respostas corrigidas para esse exame/questão, pode ser substituído. Depois da primeira correção, incluindo uma nota zero, a alteração é recusada. Repetir exatamente a mesma atribuição apresenta uma mensagem sem modificar os dados.
 
@@ -255,7 +255,7 @@ As respostas recebem números sequenciais de página e de folha e são associada
 
 A correção só pode ser guardada ou editada depois de existir uma atribuição para o par exame/questão. Sem atribuição, o GET e o POST da rota de correção devolvem HTTP 409 e a interface apresenta a opção de atribuir professor. As páginas PDF e PNG continuam disponíveis para consulta.
 
-A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito; zero é uma correção válida. **Não está definido um limite máximo por questão.** O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso. Não é calculada a nota final agregada do exame.
+A nota tem de ser um número finito e não negativo. São rejeitados valores negativos, `NaN` e infinito, e zero é uma correção válida. **Não está definido um limite máximo por questão.** O comentário é opcional. A gravação marca a resposta como avaliada e atualiza as listagens e o progresso. Não é calculada a nota final agregada do exame.
 
 As listas de respostas e digitalizações são públicas e não são filtradas por professor ou aluno. ST_3 é parcial: permite consultar os documentos e as correções, mas não identifica o aluno. O PDF original pode ser descarregado separadamente.
 
@@ -291,7 +291,7 @@ Os modelos definidos em `correction_service/correction_data.py` separam três re
 
 #### 6.5.1. Atribuição independente das digitalizações
 
-`ProfessorAssignment` identifica a atribuição de um professor a uma questão de um exame. A restrição única sobre `exam_id` e `question_number` garante uma atribuição por questão; a restrição sobre `exam_id` e `professor_id` limita cada professor a uma questão nesse exame. Existem ainda verificações de IDs positivos e do intervalo de questões entre 1 e 4.
+`ProfessorAssignment` identifica a atribuição de um professor a uma questão de um exame. A restrição única sobre `exam_id` e `question_number` garante uma atribuição por questão. A restrição sobre `exam_id` e `professor_id` limita cada professor a uma questão nesse exame. Existem ainda verificações de IDs positivos e do intervalo de questões entre 1 e 4.
 
 Esta tabela não depende da existência de um PDF: permite configurar as atribuições antes do upload. `exam_id` e `professor_id` são referências lógicas introduzidas manualmente, sem chaves estrangeiras para as bases do Admin ou do User Service. Isto mantém a independência dos serviços nesta parte do projeto.
 
@@ -299,13 +299,13 @@ Esta tabela não depende da existência de um PDF: permite configurar as atribui
 
 `ExamCorrectionPdf` representa um upload e conserva o ID do exame, o nome do ficheiro e os bytes do PDF original. `QuestionCorrection` representa uma página de resposta desse upload, guardando a versão PDF processada, a imagem PNG, a numeração e a avaliação.
 
-A relação entre estes modelos é **um-para-muitos**: um upload origina várias respostas. A chave estrangeira `exam_correction_pdf_id` liga cada resposta à sua origem. As propriedades `ExamCorrectionPdf.corrections` e `QuestionCorrection.source` são bidirecionais, através de `back_populates`. A configuração `cascade="all, delete-orphan"` remove as respostas dependentes quando a origem é eliminada pelo ORM ou quando deixam de pertencer à sua coleção; não é uma cascata SQL declarada com `ON DELETE CASCADE`.
+A relação entre estes modelos é **um-para-muitos**: um upload origina várias respostas. A chave estrangeira `exam_correction_pdf_id` liga cada resposta à sua origem. As propriedades `ExamCorrectionPdf.corrections` e `QuestionCorrection.source` são bidirecionais, através de `back_populates`. A configuração `cascade="all, delete-orphan"` remove as respostas dependentes quando a origem é eliminada pelo ORM ou quando deixam de pertencer à sua coleção. Não é uma cascata SQL declarada com `ON DELETE CASCADE`.
 
-O par origem/número de página é único. `page_number` identifica a posição da resposta processada; `sheet_number` é uma numeração interna da folha dentro do upload, não o ID do QR code nem a identidade do aluno. Ambos são positivos. `question_number` varia de 1 a 4. Os PDFs e PNGs são colunas binárias com carregamento diferido, evitando carregá-los automaticamente em todas as consultas.
+O par origem/número de página é único. `page_number` identifica a posição da resposta processada. `sheet_number` é uma numeração interna da folha dentro do upload, não o ID do QR code nem a identidade do aluno. Ambos são positivos. `question_number` varia de 1 a 4. Os PDFs e PNGs são colunas binárias com carregamento diferido, evitando carregá-los automaticamente em todas as consultas.
 
 #### 6.5.3. Avaliação e associação ao professor
 
-`evaluated`, `grade` e `comment` pertencem à resposta individual. A restrição de avaliação mantém a nota nula enquanto a resposta está pendente e exige uma nota não nula e não negativa quando está avaliada. Zero é válido. A aplicação complementa esta restrição ao rejeitar valores não finitos; não existe uma cotação máxima configurada.
+`evaluated`, `grade` e `comment` pertencem à resposta individual. A restrição de avaliação mantém a nota nula enquanto a resposta está pendente e exige uma nota não nula e não negativa quando está avaliada. Zero é válido. A aplicação complementa esta restrição ao rejeitar valores não finitos. Não existe uma cotação máxima configurada.
 
 Não existe uma chave `assignment_id` em `QuestionCorrection`. O professor é obtido pelo par formado pelo exame da origem e pela questão da resposta. Isto permite que uma atribuição posterior ao upload passe a aplicar-se às respostas já guardadas. Como a associação é consultada desta forma, a aplicação bloqueia a troca de professor após a primeira correção desse exame/questão, preservando a interpretação das avaliações existentes.
 
@@ -343,7 +343,7 @@ A implementação entregue é a dos serviços independentes da Parte 1. As funci
 - Filtragem das listagens segundo o professor ou aluno autenticado.
 - Associação, pelo vigilante, entre o aluno presente e a folha efetivamente utilizada na prova (EI_1).
 - Cálculo e apresentação da nota final agregada do exame (ST_2).
-- Consulta das digitalizações e correções associada à identidade do aluno; ST_3 permanece parcial nesta fase.
+- Consulta das digitalizações e correções associada à identidade do aluno. ST_3 permanece parcial nesta fase.
 
 O Correction não valida os exames no Admin nem os professores no User. A atribuição de professores pode anteceder o upload. A nota de uma questão tem validação numérica, mas não tem cotação máxima configurada. Estas características fazem parte do comportamento documentado da implementação atual.
 
