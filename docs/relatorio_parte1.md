@@ -5,7 +5,7 @@ Relatório de implementação — Parte 1
 ADInt · 29 de outubro de 2026
 
 **MEEC**
-**Grupo 4**
+**Grupo 10**
 
 Francisco António Lisboa Guarda (117392)
 

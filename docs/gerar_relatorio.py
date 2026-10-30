@@ -10,14 +10,14 @@ import pymupdf
 
 DIRECTORY = Path(__file__).resolve().parent
 SOURCE = DIRECTORY / "relatorio_parte1.md"
-OUTPUT = DIRECTORY / "Relatorio_ADInt_Parte1_Grupo4.pdf"
+OUTPUT = DIRECTORY / "Relatorio_ADInt_Parte1_Grupo10.pdf"
 PAGE = pymupdf.paper_rect("a4")
 CONTENT = pymupdf.Rect(48, 73, PAGE.width - 48, PAGE.height - 63)
 NAVY = (0.075, 0.16, 0.25)
 BLUE = (0.09, 0.42, 0.57)
 GRAY = (0.34, 0.41, 0.48)
 LIGHT = (0.93, 0.95, 0.97)
-GROUP = "Grupo 4"
+GROUP = "Grupo 10"
 AUTHORS = (
     "Francisco António Lisboa Guarda (117392)",
     "André Filipe Teigas Vaz (120181)",
